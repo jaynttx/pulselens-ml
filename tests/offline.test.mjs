@@ -33,10 +33,10 @@ test('offline navigation falls back to cached application shell', async () => {
   const response = await env.fetchPage('https://example.test/pulse/', 'navigate');
   assert.equal(await response.text(), 'https://example.test/pulse/index.html');
 });
-test('cached application modules load without any network request', async () => {
+test('application code tries the network and still loads its cache offline', async () => {
   const env = environment(); await env.dispatch('install');
   const response = await env.fetchPage('https://example.test/pulse/src/vitals.js');
-  assert.ok(response.ok); assert.equal(env.network.length, 0);
+  assert.ok(response.ok); assert.equal(env.network.length, 1);
 });
 test('physiological POSTs and unlisted API paths are not cached or intercepted', async () => {
   const env = environment(); await env.dispatch('install');
