@@ -17,6 +17,12 @@ consent box, select Classical POS or Deep learning, and start the camera.
 Face a light source, sit still, and allow 20–30 seconds. Stopping, changing tabs,
 revoking consent, or navigating away releases the camera.
 
+Before measuring, **Run system check** in Research insights checks the actual
+detector and neural runtime without opening a camera. It executes FacePhys,
+feature projection, SQI, and PSD on synthetic diagnostic inputs; these are never
+displayed as a person's pulse. If camera permission remains unanswered, the app
+times out with instructions instead of staying on Preparing.
+
 The first start needs internet access for MediaPipe. Deep mode also downloads
 FacePhys model assets and the LiteRT WASM runtime. To cache the weights first:
 
@@ -38,7 +44,9 @@ values or silently changes the selected method.
 
 - Original responsive frontend with lavender, white, and cream styling.
 - MediaPipe face detection and forehead/cheek regions for colour sampling.
+- Smoothed face regions and a short face-loss grace period avoid resets from detector jitter.
 - Original overlapping POS implementation with timestamp-aware resampling.
+- Zero-phase Butterworth filtering precedes spectral/autocorrelation quality tests.
 - Browser-local pretrained FacePhys SSM inference in a dedicated worker.
 - Rolling pulse waveform, frequency spectrum, and accepted-reading trend.
 - Motion, lighting, periodicity, and signal-quality checks; unreliable values hidden.

@@ -1,10 +1,10 @@
 // Cache application/model assets only. No webcam frames or measured results
 // enter Cache Storage. Changing this version refreshes the source atomically.
-const VERSION = 'pulselens-assets-v2';
+const VERSION = 'pulselens-assets-v5';
 const ROOT = new URL('./', self.location.href);
 const APP = ['index.html', 'favicon.svg', 'manifest.webmanifest', 'THIRD_PARTY_NOTICES.md',
   'src/style.css', 'src/insights.css', 'src/app.js', 'src/signal.js', 'src/vitals.js',
-  'src/charts.js', 'src/visuals.js', 'src/analysis.worker.js', 'src/deep.worker.js'];
+  'src/charts.js', 'src/visuals.js', 'src/tracking.js', 'src/diagnostics.js', 'src/camera.js', 'src/analysis.worker.js', 'src/deep.worker.js'];
 const MODELS = ['model.tflite', 'state.gz', 'proj.tflite', 'sqi_model.tflite', 'psd_model.tflite'];
 const MODEL_ROOT = 'https://raw.githubusercontent.com/xan-antx/pulseLens/e7bdd94cbe686611eb37f817bbdf48b8d770b057/apps/pulselens-deep/models/';
 const DETECTOR = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite';
@@ -29,12 +29,16 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET' || (!isAsset(url) && request.mode !== 'navigate')) return;
   event.respondWith((async () => {
     const cache = await caches.open(VERSION), hit = await cache.match(request);
-    if (hit) return hit;
+    const applicationFile = url.origin === ROOT.origin && (request.mode === 'navigate' || APP.some(path => new URL(path, ROOT).href === url.href));
+    // Application code is network-first so a hotfix isn't trapped behind a
+    // stale service-worker cache. Large, pinned model/runtime assets stay cached.
+    if (hit && !applicationFile) return hit;
     try {
       const response = await fetch(request);
       if (response.ok && isAsset(url)) await cache.put(request, response.clone());
       return response;
     } catch (error) {
+      if (hit) return hit;
       if (request.mode === 'navigate' && url.origin === ROOT.origin) return (await cache.match(new URL('index.html', ROOT).href)) || Response.error();
       throw error;
     }
