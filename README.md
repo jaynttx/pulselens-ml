@@ -24,9 +24,15 @@ FacePhys model assets and the LiteRT WASM runtime. To cache the weights first:
 npm run models
 ```
 
-If asset downloads fail, the app reports an error. It never substitutes fake
-BPM values or silently changes the selected method. This release does **not**
-guarantee offline operation. Camera access requires localhost or HTTPS.
+For offline preparation, open the frontend online and click **Prepare offline
+use** in Research insights. It loads the detector, all five neural assets, and
+their runtime without opening the webcam. The service worker confirms cached
+assets before showing a prepared status. Reload once if prompted. Then test
+with the network disconnected. Browser storage eviction or cleared caches
+requires preparation again. Camera access requires localhost or HTTPS.
+
+If downloads fail, the app reports an error. It never substitutes fake BPM
+values or silently changes the selected method.
 
 ## Features
 
@@ -39,6 +45,11 @@ guarantee offline operation. Camera access requires localhost or HTTPS.
 - Start/stop, consent withdrawal, cancellation, and camera lifecycle handling.
 - CSV export of session samples and accepted BPM estimates.
 - Paired benchmark lab with MAE, RMSE, bias, CSV export, and Python analysis.
+- Live face crop, layer-selectable learned feature maps, and projected hidden-state trajectories.
+- Learned FacePhys SQI and PSD postprocessing in Deep mode, alongside independent periodicity checks.
+- Experimental breathing proxy after 30 seconds and pulse-rate variability (RMSSD/SDNN) after about 60 clean seconds.
+- Pixel-wise temporal colour/video amplification, toggle and 1–30× gain control.
+- Installable web manifest and explicit offline asset preparation; camera data is never cached.
 - Deterministic signal-processing tests and a GitHub Actions check workflow.
 
 ## What is ML here?
@@ -55,11 +66,11 @@ inspired by [xan-antx/pulseLens](https://github.com/xan-antx/pulseLens), rather 
 a fork or a claim of authorship over its model. The model revision is pinned to
 `e7bdd94cbe686611eb37f817bbdf48b8d770b057`. See THIRD_PARTY_NOTICES.md.
 
-This is not a feature-identical clone: the reference's learned SQI, attention
-projection, hidden-state visualizations, breathing/HRV, video amplification,
-and offline service worker are not implemented. This version uses documented
-heuristic quality checks shared across methods, allowing a simpler student
-codebase and explicit uncertainty.
+This implements the same core research feature groups through a new codebase
+and frontend. Deep mode uses pretrained projection, SQI, and PSD assets;
+classical mode uses our analytical implementation. Experimental secondary
+vitals and temporal amplification are our own implementations. We do not claim
+identical numerical behavior, runtime performance, or clinical accuracy.
 
 ## Verify and evaluate
 
@@ -69,9 +80,11 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 npm run build
 ```
 
-Tests recover known synthetic pulse frequencies and check noise rejection,
-timestamp resampling, POS recovery, CSV escaping, and metric calculations.
-Synthetic tests prove numerical behavior, **not human measurement accuracy**.
+Tests recover known synthetic pulse and respiratory frequencies, verify pulse
+variability and real pixel amplification, and check noise rejection, timing,
+CSV escaping, benchmark calculations, frontend DOM wiring, and service-worker
+cache behavior. Synthetic and mocked-DOM tests prove numerical/contracts
+behavior, **not human measurement accuracy or real-browser model execution**.
 
 1. Run one method under good light, dim light, motion, and after exercise.
 2. Use a reference device simultaneously with each app observation. Record a
@@ -107,6 +120,9 @@ branch rather than overwriting existing work. Make it public only when desired.
 | `src/signal.js` | POS, uniform resampling, detrending, spectra, metrics |
 | `src/analysis.worker.js` | Background signal analysis |
 | `src/deep.worker.js` | Pretrained FacePhys inference |
+| `src/vitals.js` | Experimental respiration and pulse variability |
+| `src/visuals.js`, `src/insights.css` | Model inspection and temporal amplification |
+| `sw.js`, `manifest.webmanifest` | Offline asset cache and install metadata |
 | `scripts/download_models.py` | Optional pinned asset download |
 | `benchmark/analyze.py` | Paired evaluation |
 | `docs/PROJECT_GUIDE.md` | Explanation, study design, viva preparation |
@@ -115,11 +131,15 @@ branch rather than overwriting existing work. Make it public only when desired.
 
 Research only; not a medical device. Motion, lighting, camera frame timing,
 skin appearance, and training-domain differences can cause wrong estimates.
-Quality is a periodicity heuristic, not calibrated medical confidence. HRV,
-oxygen saturation, diagnoses, and stress claims are intentionally absent.
+Quality is a periodicity heuristic plus learned SQI in Deep mode, not calibrated
+medical confidence. The HRV-labelled panel explicitly reports exploratory
+**pulse-rate variability**, which is not interchangeable with ECG-derived
+HRV. The breathing proxy can confuse periodic movement/lighting with
+respiration. No oxygen saturation, diagnoses, or stress claims are made.
 Webcam frames, pulse samples, and inferred BPM remain in local tab memory.
-Only explicit CSV downloads persist measurements. External CDN requests load
-model/runtime assets and fonts; no analytics or physiological uploads exist.
+Only explicit CSV downloads persist measurements. Service-worker caching stores
+application/model assets, never measurements or frames. External CDN requests
+load model/runtime assets and fonts; no analytics or physiological uploads exist.
 
 Fresh application code is MIT licensed. FacePhys remains subject to its own
 MIT License with Privacy Protection Addendum, reproduced in the notices.

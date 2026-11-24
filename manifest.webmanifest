@@ -1,0 +1,11 @@
+{
+  "id": "./",
+  "name": "PulseLens Research Monitor",
+  "short_name": "PulseLens",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbfaf7",
+  "theme_color": "#eee8fa",
+  "icons": [{ "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
