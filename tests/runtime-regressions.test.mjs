@@ -33,7 +33,7 @@ test('cropping clamps face rectangles at all video boundaries', () => {
 test('system check uses classic workers and exercises inference before reporting success', async () => {
   let calls = 0, terminated = false;
   class FakeWorker {
-    constructor(url, options) { assert.match(url.href, /deep\.worker\.js$/); assert.equal(options, undefined); }
+    constructor(url, options) { assert.match(url.href, /(deep|spectrum)\.worker\.js$/); assert.equal(options, undefined); }
     postMessage(data) {
       queueMicrotask(() => {
         if (data.type === 'init') this.onmessage({ data: { type: 'ready' } });
