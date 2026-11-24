@@ -1,7 +1,7 @@
 import { mean, std, clamp, metrics, csv } from './signal.js';
 import { plot } from './charts.js';
 import { clearPanel, heatmap, trajectory, TemporalAmplifier } from './visuals.js';
-import { FaceRegionTracker, clippedBox } from './tracking.js';
+import { FaceRegionTracker, NeuralFaceTracker, NeuralFrameClock, clippedBox } from './tracking.js';
 import { checkNeuralRuntime } from './diagnostics.js';
 import { acquireCamera } from './camera.js';
 import { faceRegions, SkinSampler } from './skin.js';
@@ -20,6 +20,8 @@ let stateHistory = [[], [], [], [], []], sessionMethod = method;
 const amplifier = new TemporalAmplifier();
 const skinSampler = new SkinSampler();
 const faceTracker = new FaceRegionTracker();
+const neuralTracker = new NeuralFaceTracker();
+const neuralClock = new NeuralFrameClock();
 let missingSince = 0;
 const crop = document.createElement('canvas'); crop.width = crop.height = 36;
 const cropContext = crop.getContext('2d', { willReadFrequently: true });
@@ -31,14 +33,14 @@ function displayInvalid(text) {
   $('bpm').textContent = '—'; $('reading-status').textContent = text; $('reading-status').classList.remove('good');
 }
 function chartReset() {
-  plot($('wave')); plot($('spectrum')); plot($('trend'));
+  plot($('wave')); plot($('spectrum')); plot($('trend'), readings.slice(-180).map(r => r.bpm), { min: 40, max: 200 });
   $('quality').textContent = '—'; $('quality-fill').style.width = '0%'; $('peak-label').textContent = '— Hz';
 }
 function resetSignals() {
   captureEpoch++; pendingAnalysis = null; learnedSqi = null;
   rows = []; lastResult = null; goodFrames++; validStreak = 0; rawAccepted = [];
   rgbRows = []; lastDeepFrameAt = 0; amplifier.reset(); resetResearchValues();
-  skinSampler.reset();
+  skinSampler.reset(); neuralClock.reset();
   if (deepWorker && running) deepWorker.postMessage({ type: 'reset' });
   lastAnalysisAt = 0; chartReset();
 }
@@ -56,7 +58,7 @@ function resetInspector() {
   clearPanel($('state-trajectory'), 'Deep learning only'); clearPanel($('amplified-video'), 'Amplification off');
 }
 function resetSession() {
-  resetSignals(); faceTracker.reset(); missingSince = 0; readings = []; pulseLog = []; previousBox = null; frameTimes = [];
+  readings = []; resetSignals(); faceTracker.reset(); neuralTracker.reset(); missingSince = 0; pulseLog = []; previousBox = null; frameTimes = [];
   lastFrameAt = 0; lastFaceAt = 0; lastVideoTime = -1; lastDeepFrameAt = 0;
   ['min', 'average', 'max'].forEach(id => $(id).textContent = '—');
   $('timer').textContent = '00:00'; $('export').disabled = true;
@@ -87,7 +89,10 @@ async function createDetector() {
   const { FaceDetector, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/+esm');
   const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
   const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite';
-  return FaceDetector.createFromOptions(vision, { baseOptions: { modelAssetPath, delegate: 'CPU' }, runningMode: 'VIDEO', minDetectionConfidence: 0.7 });
+  const baseOptions = { modelAssetPath, delegate: 'GPU' };
+  const options = { baseOptions, runningMode: 'VIDEO', minDetectionConfidence: 0.5 };
+  try { return await FaceDetector.createFromOptions(vision, options); }
+  catch { baseOptions.delegate = 'CPU'; return FaceDetector.createFromOptions(vision, options); }
 }
 
 async function createLandmarker() {
@@ -249,7 +254,7 @@ function tick(now) {
     }
     missingSince = 0;
     const b = detected[0].boundingBox;
-    const tracked = faceTracker.update({ x: b.originX, y: b.originY, w: b.width, h: b.height }, dt);
+    const tracked = (method === 'deep' ? neuralTracker : faceTracker).update({ x: b.originX, y: b.originY, w: b.width, h: b.height }, dt);
     const motion = tracked.motion;
     const box = clippedBox(tracked.box, $('video').videoWidth, $('video').videoHeight);
     // Normal head movement changes the crop, but does not erase capture history.
@@ -264,7 +269,7 @@ function tick(now) {
     const pixels = sampleContext.getImageData(0, 0, 64, 64).data;
     const rgb = skin?.rgb || [0, 1, 2].map(k => { let sum = 0; for (let i = k; i < pixels.length; i += 4) sum += pixels[i]; return sum / (pixels.length / 4); });
     const brightness = mean(rgb);
-    if (brightness < 18 || brightness > 245 || box.w < 60 || (method === 'pos' && !skin)) {
+    if (method === 'pos' && (brightness < 18 || brightness > 245 || box.w < 60 || !skin)) {
       displayInvalid('Adjust distance / lighting');
       $('guidance').textContent = 'Use even lighting and bring your face closer. Your previous session readings are retained.'; return;
     }
@@ -285,9 +290,9 @@ function tick(now) {
     else if (!deepBusy) {
       const rgba = cropContext.getImageData(0, 0, 36, 36).data, pixels = new Float32Array(36 * 36 * 3);
       for (let i = 0; i < 36 * 36; i++) for (let k = 0; k < 3; k++) pixels[i * 3 + k] = rgba[i * 4 + k] / 255;
-      const neuralDt = lastDeepFrameAt ? (now - lastDeepFrameAt) / 1000 : 1 / 30;
+      const stamp = neuralClock.update(now);
       lastDeepFrameAt = now;
-      deepBusy = true; deepWorker.postMessage({ type: 'frame', pixels, dt: neuralDt, t: now, epoch: captureEpoch }, [pixels.buffer]);
+      deepBusy = true; deepWorker.postMessage({ type: 'frame', pixels, dt: stamp.dt, t: stamp.t, epoch: captureEpoch }, [pixels.buffer]);
     }
     const duration = rows.length ? (now - rows[0].t) / 1000 : 0;
     $('capture-details').textContent = `${method === 'pos' ? 'POS' : 'FacePhys'} · ${frameTimes.length} FPS · ${duration.toFixed(1)} s of signal · ${rows.length} samples`;
@@ -454,7 +459,7 @@ $('check-system').addEventListener('click', async () => {
     if (!detector) detector = await createDetector();
     if (!landmarkDetector) landmarkDetector = await createLandmarker();
     await checkNeuralRuntime(progress => message(progress));
-    message('System check passed: face detector, face landmarks, FacePhys inference, feature projection, SQI and PSD all executed. No camera was opened.');
+    message('System check passed: face detector, face landmarks, 480 FacePhys frames, feature projection, SQI and PSD all executed. No camera was opened.');
   } catch (error) { message('System check failed: ' + error.message, true); }
   finally { offlinePreparing = false; $('check-system').disabled = false; $('prepare-offline').disabled = false; }
 });
