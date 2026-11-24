@@ -43,3 +43,32 @@ test('skin mask excludes black, glare and blue background pixels', () => {
   assert.equal(isSkin(130, 100, 75), true);
   for (const rgb of [[0, 0, 0], [255, 255, 255], [40, 90, 200]]) assert.equal(isSkin(...rgb), false);
 });
+
+test('neural face Kalman update uses the reference noise parameters', async () => {
+  const { NeuralFaceTracker } = await import('../src/tracking.js');
+  const tracker = new NeuralFaceTracker();
+  tracker.update({ x: 100, y: 80, w: 160, h: 180 });
+  const result = tracker.update({ x: 110, y: 80, w: 160, h: 180 });
+  assert.ok(Math.abs(result.box.x - (100 + 10 * 1.01 / 1.51)) < 1e-10);
+  assert.ok(result.box.x < 110);
+});
+test('small head movements retain the neural tracking history', async () => {
+  const { NeuralFaceTracker } = await import('../src/tracking.js');
+  const tracker = new NeuralFaceTracker();
+  for (let i = 0; i < 100; i++) tracker.update({ x: 100 + (i % 2 ? 3 : -3), y: 80, w: 160, h: 180 });
+  const before = tracker.variance[0];
+  tracker.update({ x: 120, y: 80, w: 160, h: 180 });
+  assert.ok(tracker.variance[0] <= before + 1e-10);
+  assert.ok(tracker.values[0] < 110);
+});
+test('neural clock smooths frame jitter and advances monotonically', async () => {
+  const { NeuralFrameClock } = await import('../src/tracking.js');
+  const clock = new NeuralFrameClock(); let previous = -1;
+  for (let i = 0; i < 1000; i++) {
+    const stamp = clock.update(1000 + i * 1000 / 30 + (i % 2 ? 3 : 0));
+    assert.ok(stamp.t > previous); previous = stamp.t;
+    assert.ok(Math.abs(stamp.dt - 1 / 30) < 0.00002);
+  }
+  clock.reset(); assert.equal(clock.update(5).dt, 1 / 30);
+  assert.throws(() => clock.update(5), /increase/);
+});
