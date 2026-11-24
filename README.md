@@ -60,6 +60,7 @@ values or silently changes the selected method.
 - Separate learned SQI/PSD worker: raw 450-sample input, SQI > 0.38, actual timing correction.
 - Neural acceptance uses learned SQI; classical periodicity checks do not veto neural estimates.
 - Experimental breathing proxy after 30 seconds and pulse-rate variability (RMSSD/SDNN) after about 60 clean seconds.
+- Research panels use independent readiness checks, show captured-window progress, and preserve labelled results after stopping. A failed short BPM window does not suppress a valid breathing window.
 - Pixel-wise temporal colour/video amplification, toggle and 1–30× gain control.
 - Installable web manifest and explicit offline asset preparation; camera data is never cached.
 - Deterministic signal-processing tests and a GitHub Actions check workflow.

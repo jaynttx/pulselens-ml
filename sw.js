@@ -1,9 +1,9 @@
 // Cache application/model assets only. No webcam frames or measured results
 // enter Cache Storage. Changing this version refreshes the source atomically.
-const VERSION = 'pulselens-assets-v7';
+const VERSION = 'pulselens-assets-v8';
 const ROOT = new URL('./', self.location.href);
 const APP = ['index.html', 'favicon.svg', 'manifest.webmanifest', 'THIRD_PARTY_NOTICES.md',
-  'src/style.css', 'src/insights.css', 'src/app.js', 'src/signal.js', 'src/vitals.js',
+  'src/insights.js', 'src/style.css', 'src/insights.css', 'src/app.js', 'src/signal.js', 'src/vitals.js',
   'src/model-runtime.js', 'src/spectrum.worker.js', 'src/skin.js', 'src/charts.js', 'src/visuals.js', 'src/tracking.js', 'src/diagnostics.js', 'src/camera.js', 'src/analysis.worker.js', 'src/deep.worker.js'];
 const MODELS = ['model.tflite', 'state.gz', 'proj.tflite', 'sqi_model.tflite', 'psd_model.tflite'];
 const MODEL_ROOT = 'https://raw.githubusercontent.com/xan-antx/pulseLens/e7bdd94cbe686611eb37f817bbdf48b8d770b057/apps/pulselens-deep/models/';
