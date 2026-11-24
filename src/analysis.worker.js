@@ -16,13 +16,18 @@ self.onmessage = ({ data }) => {
       result.modelInput = raw.map(row => row.v[0]);
       result.sampleDt = (raw.at(-1).t - raw[0].t) / (449 * 1000);
     }
-    if (result) {
-      const whole = resample(data.rows, 30);
-      const longPulse = data.method === 'pos' ? pos(whole) : whole.map(v => v[0]);
-      const beatRate = data.method === 'deep' ? data.referenceBpm : result.valid ? result.bpm : null;
-      result.variability = beatRate ? variability(longPulse, 30, beatRate) : null;
-      result.breathing = breathing(data.rgbRows || [], 30);
-    }
-    self.postMessage({ id: data.id, result });
+    // These estimates are computed even when the current BPM window fails.
+    const whole = resample(data.rows, 30);
+    const longPulse = data.method === 'pos' ? pos(whole) : whole.map(v => v[0]);
+    const longEstimate = longPulse.length >= 30 * 55 ? estimate(longPulse, 30) : null;
+    const beatRate = (data.method === 'deep' ? data.referenceBpm : result?.valid ? result.bpm : null) || (longEstimate?.valid ? longEstimate.bpm : null);
+    const duration = rows => rows.length > 1 ? Math.max(0, (rows.at(-1).t - rows[0].t) / 1000) : 0;
+    const insights = {
+      capture: { pulseSeconds: duration(data.rows), colorSeconds: duration(data.rgbRows || []) },
+      breathing: breathing(data.rgbRows || [], 30),
+      variability: beatRate ? variability(longPulse, 30, beatRate) : null
+    };
+    if (result) { result.variability = insights.variability; result.breathing = insights.breathing; }
+    self.postMessage({ id: data.id, result, insights });
   } catch (e) { self.postMessage({ id: data.id, error: e.message }); }
 };

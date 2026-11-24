@@ -4,9 +4,11 @@ import { clearPanel, heatmap, trajectory, TemporalAmplifier } from './visuals.js
 import { FaceRegionTracker, NeuralFaceTracker, NeuralFrameClock, clippedBox } from './tracking.js';
 import { checkNeuralRuntime } from './diagnostics.js';
 import { acquireCamera } from './camera.js';
+import { ResearchPanels } from './insights.js';
 import { faceRegions, SkinSampler } from './skin.js';
 
 const $ = id => document.getElementById(id);
+const researchPanels = new ResearchPanels($);
 let method = 'pos', running = false, starting = false, stream = null, detector = null, landmarkDetector = null;
 let analysisWorker = null, deepWorker = null, spectrumWorker = null, frameRequest = 0, runId = 0;
 let rows = [], readings = [], pulseLog = [], observations = [];
@@ -39,17 +41,15 @@ function chartReset() {
 function resetSignals() {
   captureEpoch++; pendingAnalysis = null; learnedSqi = null;
   rows = []; lastResult = null; goodFrames++; validStreak = 0; rawAccepted = [];
-  rgbRows = []; lastDeepFrameAt = 0; amplifier.reset(); resetResearchValues();
+  rgbRows = []; lastDeepFrameAt = 0; amplifier.reset(); researchPanels.clearWindow();
   skinSampler.reset(); neuralClock.reset();
   if (deepWorker && running) deepWorker.postMessage({ type: 'reset' });
   lastAnalysisAt = 0; chartReset();
 }
 let rgbRows = [];
 function resetResearchValues() {
-  ['breathing-rate', 'hrv-rmssd', 'hrv-sdnn', 'learned-sqi'].forEach(id => $(id).textContent = '—');
-  $('breathing-status').textContent = 'Needs at least 30 seconds of steady capture.';
-  $('hrv-status').textContent = 'Needs 60 seconds of clean pulse. Exploratory PRV, not ECG-derived HRV.';
-  $('beat-count').textContent = 'No accepted beat intervals yet.';
+  researchPanels.reset();
+  $('learned-sqi').textContent = '—';
   $('sqi-status').textContent = method === 'deep' ? 'Waiting for 15 seconds of neural pulse samples.' : 'Available in Deep learning mode.';
 }
 function resetInspector() {
@@ -58,7 +58,7 @@ function resetInspector() {
   clearPanel($('state-trajectory'), 'Deep learning only'); clearPanel($('amplified-video'), 'Amplification off');
 }
 function resetSession() {
-  readings = []; resetSignals(); faceTracker.reset(); neuralTracker.reset(); missingSince = 0; pulseLog = []; previousBox = null; frameTimes = [];
+  readings = []; resetResearchValues(); resetSignals(); faceTracker.reset(); neuralTracker.reset(); missingSince = 0; pulseLog = []; previousBox = null; frameTimes = [];
   lastFrameAt = 0; lastFaceAt = 0; lastVideoTime = -1; lastDeepFrameAt = 0;
   ['min', 'average', 'max'].forEach(id => $(id).textContent = '—');
   $('timer').textContent = '00:00'; $('export').disabled = true;
@@ -184,6 +184,7 @@ async function start() {
       analysisBusy = false;
       if (data.error) { stop(); message(data.error, true); return; }
       if (data.id !== goodFrames || performance.now() - lastFaceAt > 1500) return;
+      if (data.insights) researchPanels.update(data.insights);
       if (method === 'deep' && data.result) {
         if (data.result.modelInput.length !== 450) return;
         pendingAnalysis = data;
@@ -216,7 +217,7 @@ function stop(text = 'Camera stopped. You can export your session or start a new
   $('overlay').getContext('2d').clearRect(0, 0, $('overlay').width, $('overlay').height);
   $('capture-status').textContent = 'Camera off'; $('capture-status').classList.remove('good');
   displayInvalid('Session stopped'); restoreControls(); message(text);
-  resetInspector(); resetResearchValues();
+  resetInspector(); researchPanels.stop();
 }
 
 function append(row) {
@@ -296,6 +297,7 @@ function tick(now) {
     }
     const duration = rows.length ? (now - rows[0].t) / 1000 : 0;
     $('capture-details').textContent = `${method === 'pos' ? 'POS' : 'FacePhys'} · ${frameTimes.length} FPS · ${duration.toFixed(1)} s of signal · ${rows.length} samples`;
+    researchPanels.progress({ pulseSeconds: rows.length > 1 ? (rows.at(-1).t - rows[0].t) / 1000 : 0, colorSeconds: rgbRows.length > 1 ? (rgbRows.at(-1).t - rgbRows[0].t) / 1000 : 0 });
     const requiredWindow = method === 'deep' ? 450 : 150;
     const ready = rows.length >= requiredWindow;
     if (!ready) {
@@ -311,7 +313,7 @@ function tick(now) {
 
 function applyResult(result) {
   lastResult = result;
-  if (!result) { displayInvalid('No periodic signal yet'); validStreak = 0; resetResearchValues(); return; }
+  if (!result) { displayInvalid('No periodic signal yet'); validStreak = 0; return; }
   if (result.learnedSqi != null) {
     $('learned-sqi').textContent = result.learnedSqi.toFixed(2);
     $('sqi-status').textContent = result.learnedSqi > 0.38 ? 'Learned SQI passed. Rate comes from the pretrained spectrum model.' : 'Learned SQI too low; reading hidden.';
@@ -329,12 +331,6 @@ function applyResult(result) {
     const bpm = recent[Math.floor(recent.length / 2)];
     const respiratory = result.breathing?.valid ? result.breathing : null;
     const variability = result.variability?.valid ? result.variability : null;
-    $('breathing-rate').textContent = respiratory ? respiratory.rate.toFixed(1) : '—';
-    $('breathing-status').textContent = respiratory ? 'Experimental slow colour-variation proxy. Artifacts can look like breathing.' : 'Needs 30 seconds and a clear slow periodic component.';
-    $('hrv-rmssd').textContent = variability ? variability.rmssd.toFixed(1) : '—';
-    $('hrv-sdnn').textContent = variability ? variability.sdnn.toFixed(1) : '—';
-    $('hrv-status').textContent = variability ? 'Exploratory pulse-rate variability; not ECG-derived HRV.' : 'Needs about 60 seconds of clean, consistent beat intervals.';
-    $('beat-count').textContent = variability ? `${variability.beatCount} detected beats · ${variability.rejected} rejected intervals` : 'No accepted beat intervals yet.';
     readings.push({ t: performance.now(), bpm, quality: result.quality, method, sqi: result.learnedSqi,
       breathing: respiratory?.rate, rmssd: variability?.rmssd, sdnn: variability?.sdnn });
     if (readings.length > 1800) readings.shift();
@@ -346,8 +342,7 @@ function applyResult(result) {
   } else {
     displayInvalid(result.valid ? 'Confirming signal…' : 'Signal needs improvement');
     $('guidance').textContent = method === 'deep' ? (result.learnedSqi <= 0.38 ? 'The learned SQI is low. Face the light and keep your face in view.' : 'The model has not produced a plausible pulse estimate yet.') : result.reason;
-    ['breathing-rate', 'hrv-rmssd', 'hrv-sdnn'].forEach(id => $(id).textContent = '—');
-    $('breathing-status').textContent = 'Waiting for stable pulse quality.'; $('hrv-status').textContent = 'Waiting for stable pulse quality.';
+
   }
   renderCharts();
 }
