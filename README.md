@@ -43,7 +43,8 @@ values or silently changes the selected method.
 ## Features
 
 - Original responsive frontend with lavender, white, and cream styling.
-- MediaPipe face detection and forehead/cheek regions for colour sampling.
+- MediaPipe face mesh, forehead/cheek skin masks and frequency-adaptive spatial weights for POS.
+- BlazeFace face boxes and 36 × 36 RGB input for pretrained neural inference.
 - Smoothed face regions and a short face-loss grace period avoid resets from detector jitter.
 - Original overlapping POS implementation with timestamp-aware resampling.
 - Zero-phase Butterworth filtering precedes spectral/autocorrelation quality tests.
@@ -54,7 +55,8 @@ values or silently changes the selected method.
 - CSV export of session samples and accepted BPM estimates.
 - Paired benchmark lab with MAE, RMSE, bias, CSV export, and Python analysis.
 - Live face crop, layer-selectable learned feature maps, and projected hidden-state trajectories.
-- Learned FacePhys SQI and PSD postprocessing in Deep mode, alongside independent periodicity checks.
+- Separate learned SQI/PSD worker: raw 450-sample input, SQI > 0.38, actual timing correction.
+- Neural acceptance uses learned SQI; classical periodicity checks do not veto neural estimates.
 - Experimental breathing proxy after 30 seconds and pulse-rate variability (RMSSD/SDNN) after about 60 clean seconds.
 - Pixel-wise temporal colour/video amplification, toggle and 1–30× gain control.
 - Installable web manifest and explicit offline asset preparation; camera data is never cached.
@@ -105,19 +107,24 @@ behavior, **not human measurement accuracy or real-browser model execution**.
 ## Build and publish
 
 `npm run build` writes the static app to `dist/`. Host that folder over HTTPS.
-No server-side biometric inference or database is required. To create a GitHub
-repository after authenticating the GitHub CLI:
+No server-side biometric inference or database is required. The project lives in
+[jaynttx/pulselens-ml](https://github.com/jaynttx/pulselens-ml), a separate repository.
 
-```bash
-gh auth login -h github.com
-git init -b main
-git add .
-git commit -m "Build original PulseLens student research app"
-gh repo create jaynttx/pulselens-ml --private --source=. --remote=origin --push
-```
+## Same research approach, independently written application
 
-If a repository with that name already exists, add its remote and push a new
-branch rather than overwriting existing work. Make it public only when desired.
+| Stage | Classical POS | Pretrained SSM |
+| --- | --- | --- |
+| Face tracking | MediaPipe face mesh | MediaPipe BlazeFace |
+| Input | Skin pixels from forehead and cheeks, adaptive spatial weights | Expanded 36 × 36 RGB face crop |
+| Pulse extraction | Overlapping 1.6-second POS projection | Recurrent FacePhys inference and carried hidden state |
+| Postprocessing | Detrending, Butterworth filter, FFT peak and autocorrelation | 450 raw pulse values through pretrained SQI and PSD |
+| Timing | Uniform timestamp-aware samples | Correct learned rate with actual frame interval |
+| Frontend | Waveform, spectrum, trend, export and research panels | Same UI plus projected feature/state views |
+
+The application modules are written here. Pretrained weights and tensor layouts
+remain external model interfaces and have their own attribution. A rewritten
+implementation can share a research method without reproducing identical output.
+The respiratory proxy and PRV panels are experimental extensions.
 
 ## Project layout
 
@@ -127,7 +134,9 @@ branch rather than overwriting existing work. Make it public only when desired.
 | `src/app.js` | Camera, face sampling, sessions, benchmark UI |
 | `src/signal.js` | POS, uniform resampling, detrending, spectra, metrics |
 | `src/analysis.worker.js` | Background signal analysis |
-| `src/deep.worker.js` | Pretrained FacePhys inference |
+| `src/deep.worker.js` | Pretrained FacePhys inference and projection |
+| `src/spectrum.worker.js`, `src/model-runtime.js` | Independent learned SQI/PSD and shared classic-worker loader |
+| `src/skin.js` | Face-mesh regions, skin filtering and adaptive spatial weighting |
 | `src/vitals.js` | Experimental respiration and pulse variability |
 | `src/visuals.js`, `src/insights.css` | Model inspection and temporal amplification |
 | `sw.js`, `manifest.webmanifest` | Offline asset cache and install metadata |

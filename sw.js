@@ -1,17 +1,19 @@
 // Cache application/model assets only. No webcam frames or measured results
 // enter Cache Storage. Changing this version refreshes the source atomically.
-const VERSION = 'pulselens-assets-v5';
+const VERSION = 'pulselens-assets-v6';
 const ROOT = new URL('./', self.location.href);
 const APP = ['index.html', 'favicon.svg', 'manifest.webmanifest', 'THIRD_PARTY_NOTICES.md',
   'src/style.css', 'src/insights.css', 'src/app.js', 'src/signal.js', 'src/vitals.js',
-  'src/charts.js', 'src/visuals.js', 'src/tracking.js', 'src/diagnostics.js', 'src/camera.js', 'src/analysis.worker.js', 'src/deep.worker.js'];
+  'src/model-runtime.js', 'src/spectrum.worker.js', 'src/skin.js', 'src/charts.js', 'src/visuals.js', 'src/tracking.js', 'src/diagnostics.js', 'src/camera.js', 'src/analysis.worker.js', 'src/deep.worker.js'];
 const MODELS = ['model.tflite', 'state.gz', 'proj.tflite', 'sqi_model.tflite', 'psd_model.tflite'];
 const MODEL_ROOT = 'https://raw.githubusercontent.com/xan-antx/pulseLens/e7bdd94cbe686611eb37f817bbdf48b8d770b057/apps/pulselens-deep/models/';
 const DETECTOR = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite';
 
+const LANDMARKER = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
 function isAsset(url) {
   if (url.origin === ROOT.origin) return url.href.startsWith(ROOT.href) && (APP.some(path => new URL(path, ROOT).href === url.href) || /\/models\/(model\.tflite|state\.gz|proj\.tflite|sqi_model\.tflite|psd_model\.tflite)$/.test(url.pathname));
-  return url.href.startsWith(MODEL_ROOT) || url.href === DETECTOR ||
+  return url.href.startsWith(MODEL_ROOT) || url.href === DETECTOR || url.href === LANDMARKER ||
     (url.hostname === 'cdn.jsdelivr.net' && url.pathname.startsWith('/npm/')) ||
     ['fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname);
 }
@@ -53,6 +55,7 @@ self.addEventListener('message', event => {
       for (const name of MODELS) {
         if (!(await cache.match(MODEL_ROOT + name)) && !(await cache.match(new URL('models/' + name, ROOT).href))) throw new Error('Model cache incomplete: ' + name);
       }
+      if (!(await cache.match(LANDMARKER))) throw new Error('Face landmark cache is incomplete.');
       if (!(await cache.match(DETECTOR))) throw new Error('Face detector cache is incomplete.');
       const keys = (await cache.keys()).map(request => request.url);
       if (!keys.some(key => key.includes('@litertjs/core@0.2.1') && key.endsWith('.wasm')) ||
