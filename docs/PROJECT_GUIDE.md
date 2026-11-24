@@ -36,7 +36,43 @@ The third-party FacePhys state-space neural model consumes one face crop,
 elapsed time, and recurrent hidden tensors. The worker carries returned states
 forward with the pinned input/output mapping. It returns a scalar pulse.
 The same timestamp-aware spectral estimator then estimates its repetition
-rate. Workers prevent numerical processing from blocking interface input.
+rate. Deep mode also runs the pretrained SQI and PSD models on 450 uniformly
+resampled pulse samples. The learned BPM must agree within 15 BPM with the
+independent spectral estimate and pass quality/motion checks. Workers prevent
+numerical processing from blocking interface input.
+
+The projection model takes selected recurrent tensors. Four feature maps and
+five two-dimensional state views are exposed by the layer selector. These
+are projected model activations, not causal explanations of medical accuracy.
+
+## Secondary vitals and video amplification
+
+The respiratory proxy searches 6–30 cycles/min in at least 30 seconds of
+green-channel variation after detrending and low-frequency filtering. It
+requires concentrated power away from search boundaries. Periodic lighting
+and motion may still pass; the panel is explicitly experimental.
+
+For pulse-rate variability, at least 55 seconds (nominally a 60-second rolling
+window) of pulse are filtered. Local maxima with a BPM-dependent refractory
+period give interbeat intervals. Parabolic interpolation refines timing.
+Intervals outside 300–1500 ms or more than 25% from the median are rejected.
+At least 85% must remain, with 25 originally adjacent accepted interval pairs.
+RMSSD and SDNN use these intervals. Camera timing and false peaks limit the
+result; this is exploratory PRV, not validated ECG-derived HRV.
+
+Temporal amplification maintains two exponential low-pass estimates per RGB
+pixel and amplifies their difference (0.67–3.33 Hz). The frontend gain changes
+the amplification factor. Constant pixels remain constant; no heartbeat is
+invented from the displayed BPM. Motion and light artifacts are amplified too.
+
+## Offline preparation
+
+A versioned service worker caches application/model GET requests only, plus
+runtime dependencies. The preparation button initializes the detector and
+neural models without opening a camera, then asks the worker to confirm its
+model, detector, and WASM caches. Frames and measurements are not sent to the
+worker or stored in caches. Offline readiness depends on browser storage and
+must be tested on the target browser after online preparation.
 
 This is **pretrained model integration**, not training from scratch. Do not say
 we collected a dataset, trained FacePhys, obtained its authors' accuracy, or
@@ -105,5 +141,6 @@ and project documentation. Pretrained weights are explicitly credited.
 **Did you test medical accuracy?** No. The bundled tests check numerical logic
 with synthetic signals. Human paired trials must be collected separately.
 
-**Why no HRV?** Reliable beat-to-beat timing needs stronger validation than
-estimating one dominant spectral peak, especially from ordinary webcams.
+**Is the HRV panel medically validated?** No. It is labelled exploratory PRV.
+Beat timing from an ordinary webcam needs stronger validation than detecting
+a dominant pulse frequency; ECG-derived HRV is a different measurement.
