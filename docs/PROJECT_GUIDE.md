@@ -22,7 +22,8 @@ paired measurement error. No labels such as healthy/unhealthy are inferred.
 Uniformly resample timestamped RGB traces to 30 Hz. For overlapping 1.6-second
 windows normalize each channel by its local mean. Form S1 = G−B and
 S2 = G+B−2R. Combine h = S1 + std(S1)/std(S2) × S2. Remove each window's mean
-and overlap-average. Detrend the aggregate signal. Apply a Hann taper and
+and overlap-average. Detrend and zero-phase Butterworth-filter the aggregate
+signal to 0.67–3.33 Hz before both autocorrelation and spectrum checks. Apply a Hann taper and
 evaluate spectral power between 40/60 and 200/60 Hz. Peak frequency × 60
 gives BPM. Autocorrelation close to that peak provides a periodicity check.
 
@@ -35,11 +36,13 @@ We do not claim that scanning a fine grid creates extra physiological detail.
 The third-party FacePhys state-space neural model consumes one face crop,
 elapsed time, and recurrent hidden tensors. The worker carries returned states
 forward with the pinned input/output mapping. It returns a scalar pulse.
-The same timestamp-aware spectral estimator then estimates its repetition
-rate. Deep mode also runs the pretrained SQI and PSD models on 450 uniformly
-resampled pulse samples. The learned BPM must agree within 15 BPM with the
-independent spectral estimate and pass quality/motion checks. Workers prevent
-numerical processing from blocking interface input.
+Deep mode runs the pretrained SQI and PSD models on 450 uniformly resampled
+pulse samples. As in the reference pipeline, the learned SQI gates its learned
+PSD estimate; it does not also have to pass the independent classical
+estimator's quality gate. BPM must be finite, within 40–200, and associated
+with a recently detected face. Workers prevent numerical processing from
+blocking interface input. LiteRT needs a classic worker because its generated
+WASM loader uses importScripts; a module worker is not compatible.
 
 The projection model takes selected recurrent tensors. Four feature maps and
 five two-dimensional state views are exposed by the layer selector. These
