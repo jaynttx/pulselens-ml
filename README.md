@@ -19,7 +19,8 @@ revoking consent, or navigating away releases the camera.
 
 Before measuring, **Run system check** in Research insights checks the actual
 detector and neural runtime without opening a camera. It executes FacePhys,
-feature projection, SQI, and PSD on synthetic diagnostic inputs; these are never
+480 consecutive recurrent frames, feature projection, and SQI/PSD on the resulting
+450-sample window using artificial diagnostic input; these are never
 displayed as a person's pulse. If camera permission remains unanswered, the app
 times out with instructions instead of staying on Preparing.
 
@@ -44,7 +45,8 @@ values or silently changes the selected method.
 
 - Original responsive frontend with lavender, white, and cream styling.
 - MediaPipe face mesh, forehead/cheek skin masks and frequency-adaptive spatial weights for POS.
-- BlazeFace face boxes and 36 × 36 RGB input for pretrained neural inference.
+- BlazeFace face boxes with scalar Kalman smoothing and 36 × 36 RGB input for pretrained neural inference.
+- Reference-style smoothed frame interval and virtual timestamps; normal motion does not reset neural state.
 - Smoothed face regions and a short face-loss grace period avoid resets from detector jitter.
 - Original overlapping POS implementation with timestamp-aware resampling.
 - Zero-phase Butterworth filtering precedes spectral/autocorrelation quality tests.

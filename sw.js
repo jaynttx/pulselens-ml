@@ -1,6 +1,6 @@
 // Cache application/model assets only. No webcam frames or measured results
 // enter Cache Storage. Changing this version refreshes the source atomically.
-const VERSION = 'pulselens-assets-v6';
+const VERSION = 'pulselens-assets-v7';
 const ROOT = new URL('./', self.location.href);
 const APP = ['index.html', 'favicon.svg', 'manifest.webmanifest', 'THIRD_PARTY_NOTICES.md',
   'src/style.css', 'src/insights.css', 'src/app.js', 'src/signal.js', 'src/vitals.js',
