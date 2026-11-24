@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1] / 'models'
 def main():
     ROOT.mkdir(exist_ok=True)
     manifest = {'repository': 'xan-antx/pulseLens', 'revision': REVISION, 'files': {}}
-    for name in ['model.tflite', 'state.gz']:
+    for name in ['model.tflite', 'state.gz', 'proj.tflite', 'sqi_model.tflite', 'psd_model.tflite']:
         with urlopen(BASE + 'models/' + name, timeout=90) as response:
             content = response.read()
         if name.endswith('.tflite') and content[4:8] != b'TFL3':
@@ -23,7 +23,7 @@ def main():
         manifest['files'][name] = {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
         print(f'Cached {name}: {len(content):,} bytes')
     (ROOT / 'download-manifest.json').write_text(json.dumps(manifest, indent=2))
-    print('Model assets cached. Runtime and detector still need CDN access.')
+    print('Model assets cached. Use Prepare offline use in the app to cache the detector and runtimes too.')
 
 if __name__ == '__main__':
     main()
