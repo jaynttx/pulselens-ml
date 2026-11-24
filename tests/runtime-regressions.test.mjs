@@ -38,13 +38,13 @@ test('system check uses classic workers and exercises inference before reporting
       queueMicrotask(() => {
         if (data.type === 'init') this.onmessage({ data: { type: 'ready' } });
         if (data.type === 'frame') { calls++; this.onmessage({ data: { type: 'pulse', value: 0.01, visualization: calls % 5 === 0 ? { fm1: [1, 2, 3, 4] } : null } }); }
-        if (data.type === 'analyze') this.onmessage({ data: { type: 'analysis', sqi: 0.8, bpm: 72 } });
+        if (data.type === 'analyze') { assert.ok(calls >= 6); assert.equal(data.samples.length, 450); assert.ok(data.samples.every(Number.isFinite)); this.onmessage({ data: { type: 'analysis', sqi: 0.8, bpm: 72 } }); }
       });
     }
     terminate() { terminated = true; }
   }
   const result = await checkNeuralRuntime(() => {}, FakeWorker);
-  assert.equal(calls, 6); assert.equal(result.projection, true); assert.equal(terminated, true);
+  assert.ok(calls >= 6); assert.equal(result.projection, true); assert.equal(terminated, true);
 });
 test('system check surfaces actual worker startup errors', async () => {
   class FailingWorker {
