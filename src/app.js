@@ -1,6 +1,9 @@
 import { mean, std, clamp, metrics, csv } from './signal.js';
 import { plot } from './charts.js';
 import { clearPanel, heatmap, trajectory, TemporalAmplifier } from './visuals.js';
+import { FaceRegionTracker, clippedBox } from './tracking.js';
+import { checkNeuralRuntime } from './diagnostics.js';
+import { acquireCamera } from './camera.js';
 
 const $ = id => document.getElementById(id);
 let method = 'pos', running = false, starting = false, stream = null, detector = null;
@@ -14,6 +17,8 @@ let captureEpoch = 0, pendingAnalysis = null, learnedSqi = null, lastVisualizati
 let offlinePreparing = false;
 let stateHistory = [[], [], [], [], []], sessionMethod = method;
 const amplifier = new TemporalAmplifier();
+const faceTracker = new FaceRegionTracker();
+let missingSince = 0;
 const crop = document.createElement('canvas'); crop.width = crop.height = 36;
 const cropContext = crop.getContext('2d', { willReadFrequently: true });
 const sample = document.createElement('canvas'); sample.width = sample.height = 64;
@@ -31,6 +36,7 @@ function resetSignals() {
   captureEpoch++; pendingAnalysis = null; learnedSqi = null;
   rows = []; lastResult = null; goodFrames++; validStreak = 0; rawAccepted = [];
   rgbRows = []; lastDeepFrameAt = 0; amplifier.reset(); resetResearchValues();
+  faceTracker.reset(); missingSince = 0;
   if (deepWorker && running) deepWorker.postMessage({ type: 'reset' });
   lastAnalysisAt = 0; chartReset();
 }
@@ -83,12 +89,15 @@ async function createDetector() {
 }
 
 async function initializeDeep(token) {
-  const worker = new Worker(new URL('./deep.worker.js', import.meta.url), { type: 'module' });
+  // LiteRT's generated WASM loader calls importScripts: it needs a classic
+  // Worker. The worker itself uses dynamic import(), which is supported here.
+  const worker = new Worker(new URL('./deep.worker.js', import.meta.url));
   deepWorker = worker;
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Model loading timed out. Check internet access or run npm run models.')), 90000);
     worker.onerror = () => { clearTimeout(timeout); reject(new Error('Deep learning runtime could not load. Check your connection.')); };
     worker.onmessage = ({ data }) => {
+      if (data.type === 'progress') message(data.message);
       if (data.type === 'ready') { clearTimeout(timeout); resolve(); }
       if (data.type === 'error') { clearTimeout(timeout); reject(new Error(data.message)); }
     };
@@ -103,8 +112,10 @@ async function initializeDeep(token) {
       const result = pendingAnalysis.result; pendingAnalysis = null;
       learnedSqi = clamp(data.sqi, 0, 1);
       result.learnedSqi = learnedSqi;
-      result.valid = result.valid && learnedSqi > 0.38 && data.bpm >= 40 && data.bpm <= 200 && Math.abs(result.bpm - data.bpm) <= 15;
+      result.valid = learnedSqi > 0.38 && data.bpm >= 40 && data.bpm <= 200 && performance.now() - lastFaceAt < 500;
       result.bpm = data.bpm;
+      result.quality = learnedSqi;
+      result.frequency = data.bpm / 60;
       applyResult(result); return;
     }
     if (data.type === 'pulse') {
@@ -126,6 +137,7 @@ async function start() {
   starting = true; const token = ++runId;
   $('start').disabled = true; $('start').textContent = 'Preparing…'; $('stop').disabled = false;
   $('prepare-offline').disabled = true;
+  $('check-system').disabled = true;
   document.querySelectorAll('[data-method]').forEach(b => b.disabled = true);
   resetSession();
   message(method === 'deep' ? 'Loading the face detector and pretrained model. First use may take a minute.' : 'Loading the face detector. Your camera will request permission next.');
@@ -134,7 +146,9 @@ async function start() {
     if (token !== runId) return;
     if (method === 'deep') await initializeDeep(token);
     if (token !== runId) return;
-    const acquired = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: 'user' } });
+    message('Waiting for camera permission. Choose Allow for this page in this browser.');
+    const acquired = await acquireCamera(constraints => navigator.mediaDevices.getUserMedia(constraints),
+      { audio: false, video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: 'user' } }, () => token === runId);
     if (token !== runId) { acquired.getTracks().forEach(t => t.stop()); return; }
     stream = acquired; $('video').srcObject = stream; await $('video').play();
     if (token !== runId) { acquired.getTracks().forEach(t => t.stop()); return; }
@@ -168,6 +182,7 @@ function restoreControls() {
   starting = false; $('start').disabled = false; $('start').textContent = 'Start new session'; $('stop').disabled = true;
   document.querySelectorAll('[data-method]').forEach(b => b.disabled = false);
   $('prepare-offline').disabled = false;
+  $('check-system').disabled = false;
 }
 function stop(text = 'Camera stopped. You can export your session or start a new one.') {
   ++runId; running = false; starting = false; cancelAnimationFrame(frameRequest);
@@ -200,22 +215,30 @@ function tick(now) {
   const sec = Math.floor((now - startedAt) / 1000);
   $('timer').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
   try {
-    if (dt > 0.25) resetSignals();
+    if (dt > 0.75) resetSignals();
     const detected = detector.detectForVideo($('video'), now).detections;
     const context = $('overlay').getContext('2d'); context.clearRect(0, 0, $('overlay').width, $('overlay').height);
     if (detected.length !== 1) {
-      if (rows.length || rgbRows.length) resetSignals(); previousBox = null; lastFaceAt = 0;
-      resetInspector();
+      if (!missingSince) missingSince = now;
+      if (detected.length > 1 || now - missingSince > 750) {
+        if (rows.length || rgbRows.length) resetSignals();
+        previousBox = null; lastFaceAt = 0; resetInspector();
+      }
       displayInvalid(detected.length ? 'One person at a time' : 'Face not detected');
       $('guidance').textContent = detected.length ? 'Only one person should be visible in the camera.' : 'Bring your face into view and face the camera.'; return;
     }
+    missingSince = 0;
     const b = detected[0].boundingBox;
-    const box = { x: b.originX, y: b.originY - b.height * 0.15, w: b.width, h: b.height * 1.15 };
-    const motion = previousBox ? Math.hypot(box.x - previousBox.x, box.y - previousBox.y) / box.w + Math.abs(box.w - previousBox.w) / box.w : 0;
+    const tracked = faceTracker.update({ x: b.originX, y: b.originY, w: b.width, h: b.height }, dt);
+    const motion = tracked.motion;
+    const box = clippedBox(tracked.box, $('video').videoWidth, $('video').videoHeight);
+    if (tracked.changed) resetSignals();
     previousBox = box;
     context.strokeStyle = motion > 0.04 ? '#d6a585' : '#bca0dc'; context.lineWidth = 2;
     context.strokeRect(box.x, box.y, box.w, box.h);
     // Sample three fixed subregions within the detected face, avoiding eyes/mouth.
+    if (box.w < 1 || box.h < 1) { displayInvalid('Move your face into the frame'); return; }
+    sampleContext.clearRect(0, 0, 64, 64);
     sampleContext.drawImage($('video'), box.x, box.y, box.w, box.h, 0, 0, 64, 64);
     const patches = [[21, 6, 22, 9], [9, 32, 13, 13], [42, 32, 13, 13]];
     const rgb = [0, 0, 0]; let count = 0, clipped = 0;
@@ -225,15 +248,17 @@ function tick(now) {
     }
     for (let k = 0; k < 3; k++) rgb[k] /= count;
     const brightness = mean(rgb);
-    if (motion > 0.055 || brightness < 35 || brightness > 235 || clipped / count > 0.25 || box.w < 70) {
+    if ((method === 'pos' && motion > 0.15) || brightness < 18 || brightness > 245 || clipped / count > 0.5 || box.w < 60) {
       if (rows.length || rgbRows.length) resetSignals(); lastFaceAt = 0;
       resetInspector();
-      displayInvalid(motion > 0.055 ? 'Hold still to measure' : 'Adjust distance / lighting');
-      $('guidance').textContent = motion > 0.055 ? 'Movement detected. The signal window has been restarted.' : 'Move closer and use even, comfortable lighting without glare.'; return;
+      displayInvalid(motion > 0.15 ? 'Hold still to measure' : 'Adjust distance / lighting');
+      $('guidance').textContent = motion > 0.15 ? 'Large movement detected. Settle into a comfortable position.' : 'Move closer and use even, comfortable lighting without glare.'; return;
     }
     lastFaceAt = now;
     rgbRows.push({ t: now, v: [...rgb] }); while (rgbRows.length && now - rgbRows[0].t > 60000) rgbRows.shift();
-    cropContext.drawImage($('video'), box.x, box.y, box.w, box.h, 0, 0, 36, 36);
+    const neuralBox = clippedBox({ x: box.x, y: box.y - box.h * 0.24, w: box.w, h: box.h * 1.2 }, $('video').videoWidth, $('video').videoHeight);
+    cropContext.clearRect(0, 0, 36, 36);
+    cropContext.drawImage($('video'), neuralBox.x, neuralBox.y, neuralBox.w, neuralBox.h, 0, 0, 36, 36);
     $('face-roi').getContext('2d').drawImage(crop, 0, 0, 180, 180);
     if ($('amplify').checked) {
       const pixels = sampleContext.getImageData(0, 0, 64, 64);
@@ -244,7 +269,6 @@ function tick(now) {
     }
     if (method === 'pos') append({ t: now, v: rgb });
     else if (!deepBusy) {
-      cropContext.drawImage($('video'), box.x, box.y, box.w, box.h, 0, 0, 36, 36);
       const rgba = cropContext.getImageData(0, 0, 36, 36).data, pixels = new Float32Array(36 * 36 * 3);
       for (let i = 0; i < 36 * 36; i++) for (let k = 0; k < 3; k++) pixels[i * 3 + k] = rgba[i * 4 + k] / 255;
       const neuralDt = lastDeepFrameAt ? (now - lastDeepFrameAt) / 1000 : 1 / 30;
@@ -252,6 +276,7 @@ function tick(now) {
       deepBusy = true; deepWorker.postMessage({ type: 'frame', pixels, dt: neuralDt, t: now, epoch: captureEpoch }, [pixels.buffer]);
     }
     const duration = rows.length ? (now - rows[0].t) / 1000 : 0;
+    $('capture-details').textContent = `${method === 'pos' ? 'POS' : 'FacePhys'} · ${frameTimes.length} FPS · ${duration.toFixed(1)} s of signal · ${rows.length} samples`;
     const requiredWindow = method === 'deep' ? 15.1 : 12;
     if (duration < requiredWindow) {
       displayInvalid(`Collecting signal · ${Math.min(100, Math.floor(duration / requiredWindow * 100))}%`);
@@ -299,7 +324,8 @@ function applyResult(result) {
     $('guidance').textContent = 'Your signal is periodic and stable. Keep the same position for a longer observation.';
     $('app-bpm').value = bpm.toFixed(1); $('benchmark-method').value = method;
   } else {
-    displayInvalid(result.valid ? 'Confirming signal…' : 'Signal needs improvement'); $('guidance').textContent = 'Keep still and improve lighting. Unreliable estimates are hidden.';
+    displayInvalid(result.valid ? 'Confirming signal…' : 'Signal needs improvement');
+    $('guidance').textContent = method === 'deep' ? (result.learnedSqi <= 0.38 ? 'The learned SQI is low. Face the light and keep your face in view.' : 'The model has not produced a plausible pulse estimate yet.') : result.reason;
     ['breathing-rate', 'hrv-rmssd', 'hrv-sdnn'].forEach(id => $(id).textContent = '—');
     $('breathing-status').textContent = 'Waiting for stable pulse quality.'; $('hrv-status').textContent = 'Waiting for stable pulse quality.';
   }
@@ -378,7 +404,7 @@ $('amplify').addEventListener('change', () => {
 
 let offlineRegistration = null;
 if ('serviceWorker' in navigator && window.isSecureContext) {
-  offlineRegistration = navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { type: 'module' });
+  offlineRegistration = navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { type: 'module', updateViaCache: 'none' });
   offlineRegistration.catch(() => { $('offline-status').textContent = 'Offline cache unavailable'; });
 }
 $('prepare-offline').addEventListener('click', async () => {
@@ -392,7 +418,7 @@ $('prepare-offline').addEventListener('click', async () => {
     if (!navigator.serviceWorker.controller) throw new Error('Reload this page once to activate offline caching, then try again.');
     button.textContent = 'Preparing…'; message('Caching the application, detector, model and runtime. No camera is opened.');
     if (!detector) detector = await createDetector();
-    worker = new Worker(new URL('./deep.worker.js', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./deep.worker.js', import.meta.url));
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Offline preparation timed out. Check your internet connection.')), 90000);
       worker.onmessage = ({ data }) => { if (data.type === 'ready' || data.type === 'error') { clearTimeout(timeout); data.type === 'ready' ? resolve() : reject(new Error(data.message)); } };
@@ -410,6 +436,17 @@ $('prepare-offline').addEventListener('click', async () => {
     message('Offline assets prepared in this browser. Test once with the network disconnected; browser storage can still be cleared.');
   } catch (error) { message(error.message, true); }
   finally { worker?.terminate(); button.textContent = 'Prepare offline use'; button.disabled = false; offlinePreparing = false; }
+});
+$('check-system').addEventListener('click', async () => {
+  if (running || starting || offlinePreparing) return;
+  offlinePreparing = true; $('check-system').disabled = true; $('prepare-offline').disabled = true;
+  try {
+    message('Checking the detector and real neural runtime without opening the camera…');
+    if (!detector) detector = await createDetector();
+    await checkNeuralRuntime(progress => message(progress));
+    message('System check passed: face detector, FacePhys inference, feature projection, SQI and PSD all executed. No camera was opened.');
+  } catch (error) { message('System check failed: ' + error.message, true); }
+  finally { offlinePreparing = false; $('check-system').disabled = false; $('prepare-offline').disabled = false; }
 });
 resetInspector(); resetResearchValues();
 updateView();

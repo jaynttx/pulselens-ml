@@ -3,6 +3,26 @@ export const mean = a => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 export const std = a => { const m = mean(a); return Math.sqrt(mean(a.map(v => (v - m) ** 2))); };
 export const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
+// Zero-phase, second-order Butterworth high/low passes. Remove out-of-band
+// illumination drift before *both* spectral and time-domain quality checks.
+export function bandpass(values, fs = 30, low = 0.67, high = 3.33) {
+  if (values.length < 4) return [...values];
+  function pass(input, cutoff, highpass) {
+    const w = 2 * Math.PI * cutoff / fs, c = Math.cos(w), alpha = Math.sin(w) / Math.SQRT2;
+    const a0 = 1 + alpha, a1 = -2 * c / a0, a2 = (1 - alpha) / a0;
+    const b0 = (highpass ? (1 + c) : (1 - c)) / (2 * a0);
+    const b1 = (highpass ? -(1 + c) : (1 - c)) / a0, b2 = b0;
+    let z1 = 0, z2 = 0;
+    return input.map(x => { const y = b0 * x + z1; z1 = b1 * x - a1 * y + z2; z2 = b2 * x - a2 * y; return y; });
+  }
+  const pad = Math.min(values.length - 1, Math.ceil(fs * 3));
+  const extended = [...values.slice(1, pad + 1).reverse().map(v => 2 * values[0] - v), ...values,
+    ...values.slice(-pad - 1, -1).reverse().map(v => 2 * values.at(-1) - v)];
+  const forward = pass(pass(extended, low, true), high, false);
+  const backward = pass(pass(forward.reverse(), low, true), high, false).reverse();
+  return backward.slice(pad, pad + values.length);
+}
+
 export function detrend(a) {
   const n = a.length, center = (n - 1) / 2, m = mean(a);
   let numerator = 0, denominator = 0;
@@ -46,7 +66,7 @@ export function pos(rgb, fs = 30) {
 // enough for a dedicated Worker; zero-padding/interpolation adds no true resolution.
 export function estimate(pulse, fs = 30) {
   if (pulse.length < fs * 10 || pulse.some(v => !Number.isFinite(v))) return null;
-  const clean = detrend(pulse), spread = std(clean);
+  const clean = bandpass(detrend(pulse), fs), spread = std(clean);
   if (spread < 1e-10) return null;
   const x = clean.map(v => v / spread);
   const taper = x.map((v, i) => v * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (x.length - 1))));
@@ -77,7 +97,9 @@ export function estimate(pulse, fs = 30) {
   }
   const agreement = bestLag && bestCorrelation > 0.3;
   const quality = clamp(concentration * Math.max(0, bestCorrelation), 0, 1);
-  return { bpm: frequency * 60, frequency, quality, valid: concentration > 0.45 && !!agreement && quality > 0.38,
+  const valid = concentration > 0.45 && !!agreement && quality > 0.38;
+  const reason = concentration <= 0.45 ? 'Pulse peak is not distinct from noise.' : !agreement ? 'Pulse timing is not periodic yet.' : quality <= 0.38 ? 'Pulse is present but too noisy for a reliable estimate.' : 'Periodic pulse detected.';
+  return { bpm: frequency * 60, frequency, quality, valid, reason, concentration,
     frequencies, powers: powers.map(v => v / Math.max(...powers, 1e-12)), waveform: x, correlation: bestCorrelation };
 }
 

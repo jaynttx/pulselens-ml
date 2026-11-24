@@ -13,7 +13,7 @@ let library, model, projection, sqiModel, psdModel, initialState, metadata, tens
 
 async function asset(name) {
   try {
-    const local = await fetch(new URL(`../models/${name}`, import.meta.url));
+    const local = await fetch(new URL(`../models/${name}`, self.location.href));
     if (local.ok) return local;
   } catch { /* Cached remote assets can still work without local weights. */ }
   const remote = await fetch(REMOTE + name);
@@ -22,6 +22,7 @@ async function asset(name) {
 }
 
 async function initialize() {
+  self.postMessage({ type: 'progress', message: 'Loading the neural WASM runtime…' });
   library = await import(RUNTIME + '+esm');
   // The runtime resolves WASM relative to its bundle in some browsers.
   const originalFetch = self.fetch;
@@ -34,10 +35,12 @@ async function initialize() {
     try { return await library.loadAndCompile(url, { accelerator: 'wasm' }); }
     finally { URL.revokeObjectURL(url); }
   }
+  self.postMessage({ type: 'progress', message: 'Loading pretrained FacePhys, projection, quality and spectrum models…' });
   [model, projection, sqiModel, psdModel] = await Promise.all([
     compile('model.tflite'), compile('proj.tflite'), compile('sqi_model.tflite'), compile('psd_model.tflite')
   ]);
   const stateResponse = await asset('state.gz');
+  self.postMessage({ type: 'progress', message: 'Initializing recurrent neural state…' });
   initialState = await new Response(stateResponse.body.pipeThrough(new DecompressionStream('gzip'))).json();
   const inputs = model.getInputDetails();
   if (inputs.length !== OUTPUT_FOR_INPUT.length) throw new Error('FacePhys input contract mismatch. Model assets must use the pinned revision.');
