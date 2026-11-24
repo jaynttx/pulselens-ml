@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eee8fa">
+  <meta name="description" content="A student research workbench for browser-local contactless pulse estimation.">
+  <title>PulseLens · A little closer to your heartbeat</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#monitor"><span class="brand-mark">⌁</span> PulseLens<span class="brand-dot">.</span></a>
+    <div class="sidebar-label">YOUR WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <a class="nav-link active" href="#monitor"><span>◉</span> Live monitor</a>
+      <a class="nav-link" href="#benchmark"><span>▥</span> Benchmark lab</a>
+      <a class="nav-link" href="#about"><span>◎</span> Behind the science</a>
+    </nav>
+    <div class="sidebar-note"><span class="mini-orbit">♡</span><h3>Your camera.<br>Your data. Your device.</h3><p>Video and pulse signals stay in this browser.</p></div>
+    <a class="profile" href="https://github.com/jaynttx" target="_blank" rel="noreferrer"><span class="avatar">JK</span><span>Jayant Kaushik<small>@jaynttx · ML project</small></span></a>
+  </aside>
+  <main>
+    <header class="topbar"><span>RESEARCH WORKSPACE <span class="crumb">/ Pulse monitor</span></span><span class="private-badge">◈ &nbsp; On-device processing</span></header>
+    <section id="monitor" class="view">
+      <div class="page-heading"><div><span class="eyebrow">A LITTLE CLOSER TO YOUR HEARTBEAT</span><h1>Find your rhythm<span>.</span></h1><p>A quiet moment. A simple camera. A new way to see your pulse.</p></div><button class="button secondary" id="export" disabled>⇩ &nbsp; Export session</button></div>
+      <div class="notice" id="notice" role="status" aria-live="polite">Ready when you are. Choose a method, then start your camera.</div>
+      <div class="workspace-grid">
+        <section class="card camera-card">
+          <div class="card-heading"><div><span class="eyebrow">YOUR CAMERA</span><h2>Live capture</h2></div><span class="pill" id="capture-status">Camera off</span></div>
+          <div class="camera-stage"><video id="video" muted playsinline></video><canvas id="overlay"></canvas><div class="camera-placeholder" id="placeholder"><div class="face-outline"><span>+</span></div><h3>A heartbeat, hiding in plain sight.</h3><p>Position your face in the frame.<br>We’ll take care of the tiny details.</p></div><span class="camera-caption" id="camera-caption">NO VIDEO IS RECORDED OR UPLOADED</span></div>
+          <div class="capture-controls"><div class="method-switch" role="group" aria-label="Estimation method"><button class="selected" data-method="pos" aria-pressed="true">Classical POS</button><button data-method="deep" aria-pressed="false">Deep learning <span>SSM</span></button></div><div class="capture-buttons"><button class="button primary" id="start">Start camera</button><button class="button secondary" id="stop" disabled>Stop</button></div></div>
+          <label class="consent"><input type="checkbox" id="consent"> I consent to local webcam pulse estimation for myself.</label>
+          <div class="camera-tips"><span>☀ &nbsp; Face the light</span><span>◎ &nbsp; Keep still</span><span>◷ &nbsp; Allow 20–30 seconds</span></div>
+        </section>
+        <section class="card heart-card"><div class="card-heading"><div><span class="eyebrow">ESTIMATED HEART RATE</span><h2>Your pulse, at a glance</h2></div><span class="heart-icon">♡</span></div><div class="bpm-display"><strong id="bpm">—</strong><span>BPM</span></div><span class="pill" id="reading-status">Waiting for a signal</span><p class="reading-description">Readings appear only after a stable signal is detected.</p><div class="quality-label"><span>Signal quality</span><strong id="quality">—</strong></div><div class="quality-track"><span id="quality-fill"></span></div><div class="mini-stats"><div><span>MIN</span><strong id="min">—</strong></div><div><span>AVERAGE</span><strong id="average">—</strong></div><div><span>MAX</span><strong id="max">—</strong></div></div><div class="session-footer"><span id="timer">00:00</span><span id="fps">0 FPS</span><span id="latency">— ms</span></div></section>
+        <section class="card waveform-card"><div class="card-heading"><div><span class="eyebrow">THE SHAPE OF A HEARTBEAT</span><h2>Pulse waveform</h2></div><span class="chart-label" id="wave-label">Awaiting capture</span></div><canvas id="wave" class="chart" aria-label="Estimated blood volume pulse waveform"></canvas><div class="chart-axis"><span>Earlier</span><span>Blood volume pulse · normalized amplitude</span><span>Now</span></div></section>
+        <section class="card spectrum-card"><div class="card-heading"><div><span class="eyebrow">FREQUENCY DOMAIN</span><h2>Signal spectrum</h2></div><span class="chart-label" id="peak-label">— Hz</span></div><canvas id="spectrum" class="chart" aria-label="Pulse power spectrum from 40 to 200 BPM"></canvas><div class="chart-axis"><span>40 BPM</span><span>120</span><span>200 BPM</span></div></section>
+        <section class="card trend-card"><div class="card-heading"><div><span class="eyebrow">A MOMENT IN TIME</span><h2>Session trend</h2></div><span class="chart-label">Accepted readings only</span></div><canvas id="trend" class="chart" aria-label="Accepted heart rate readings over time"></canvas></section>
+        <section class="card insight-card"><span class="eyebrow">A GOOD SIGNAL STARTS HERE</span><h2>Small changes.<br>Clearer readings.</h2><p id="guidance">Sit comfortably with your face evenly lit. Avoid talking or moving while measuring.</p><div class="method-description" id="method-description">POS projects facial colour changes to reduce shared lighting noise. No pulse model is required.</div></section>
+      </div>
+      <div class="research-note">◈ &nbsp; An experimental student project. Estimates can be inaccurate; this is not a medical device.</div>
+    </section>
+    <section id="benchmark" class="view" hidden><div class="page-heading"><div><span class="eyebrow">TEST THE IDEA, MEASURE THE DIFFERENCE</span><h1>Benchmark lab<span>.</span></h1><p>Compare each method with its own simultaneous reference reading.</p></div></div><div class="card benchmark-card"><h2>Record a paired observation</h2><p>Take a reference sensor reading during the same window as the app. Switch methods only between trials.</p><form id="benchmark-form"><label>Condition<select id="condition"><option>Good light</option><option>Dim light</option><option>Motion / talking</option><option>After exercise</option></select></label><label>Method<select id="benchmark-method"><option value="pos">Classical POS</option><option value="deep">FacePhys SSM</option></select></label><label>App BPM<input id="app-bpm" type="number" min="30" max="240" step="0.1" required></label><label>Reference BPM<input id="ref-bpm" type="number" min="30" max="240" step="0.1" required></label><button class="button primary">Add observation</button></form><div class="benchmark-metrics" id="benchmark-metrics">No observations yet. Measured results will appear here.</div><div class="table-wrap"><table><thead><tr><th>Condition</th><th>Method</th><th>App BPM</th><th>Reference</th><th>Error</th><th>Action</th></tr></thead><tbody id="observations"></tbody></table></div><button class="button secondary" id="export-benchmark" disabled>Download benchmark CSV</button><p class="muted">Observations remain in this tab only. Export before closing. No sample numbers are presented as real measurements.</p></div></section>
+    <section id="about" class="view" hidden><div class="page-heading"><div><span class="eyebrow">UNDERSTAND WHAT YOU BUILD</span><h1>Behind the science<span>.</span></h1><p>Two approaches. One tiny change in reflected light.</p></div></div><div class="about-grid"><article class="card"><h2>How does a camera see your pulse?</h2><p>Blood volume changes with each heartbeat, creating subtle changes in reflected light from facial skin. Remote photoplethysmography (rPPG) estimates the repetition rate of these changes.</p><h3>The classical path</h3><p>Face detection → cheek and forehead colour traces → overlapping POS windows → detrending → spectral and autocorrelation analysis → quality gating → BPM.</p><h3>The learned path</h3><p>A 36 × 36 RGB face crop enters the pretrained FacePhys state-space model. Its hidden state is updated with each frame. The predicted pulse is analysed over a rolling time window to estimate BPM.</p></article><article class="card"><h2>What is our contribution?</h2><p>New frontend, camera/session lifecycle, original POS and spectral implementation, a new inference adapter, quality checks, paired benchmark tools, automated signal tests, and project documentation.</p><p>FacePhys model weights are pretrained third-party assets; we do not claim to have trained them. The original PulseLens repository inspired this comparison.</p><h3>Be honest about uncertainty</h3><p>Motion, illumination, camera frame timing, skin appearance, and model training-domain differences affect estimates. Spectral concentration is a heuristic quality score, not a probability of medical accuracy.</p><a href="https://github.com/xan-antx/pulseLens" target="_blank" rel="noreferrer">Reference project</a><p class="muted">See README.md and docs/PROJECT_GUIDE.md for model provenance, reproducible testing, and viva preparation.</p></article></div></section>
+    <footer>PulseLens <span>Made with curiosity. Built by jaynttx.</span><span>Contactless pulse research · 2026</span></footer>
+  </main>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
