@@ -62,20 +62,44 @@ export function pos(rgb, fs = 30) {
   return detrend(output.map((v, i) => v / Math.max(counts[i], 1)));
 }
 
-// Direct periodogram over the physiological band. At 600 samples this is small
-// enough for a dedicated Worker; zero-padding/interpolation adds no true resolution.
+// Iterative radix-2 FFT; padding permits peak interpolation without claiming
+// more physical frequency resolution than the observation window provides.
+export function powerSpectrum(values, fs = 30) {
+  let n = 1;
+  while (n < values.length * 4) n *= 2;
+  const real = new Float64Array(n), imaginary = new Float64Array(n);
+  real.set(values);
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    while (j & bit) { j ^= bit; bit >>= 1; }
+    j ^= bit;
+    if (i < j) [real[i], real[j]] = [real[j], real[i]];
+  }
+  for (let span = 2; span <= n; span *= 2) {
+    for (let start = 0; start < n; start += span) {
+      for (let k = 0; k < span / 2; k++) {
+        const angle = -2 * Math.PI * k / span, left = start + k, right = left + span / 2;
+        const re = real[right] * Math.cos(angle) - imaginary[right] * Math.sin(angle);
+        const im = real[right] * Math.sin(angle) + imaginary[right] * Math.cos(angle);
+        real[right] = real[left] - re; imaginary[right] = imaginary[left] - im;
+        real[left] += re; imaginary[left] += im;
+      }
+    }
+  }
+  const frequencies = [], powers = [];
+  for (let k = Math.ceil(40 / 60 * n / fs); k <= Math.floor(200 / 60 * n / fs); k++) {
+    frequencies.push(k * fs / n); powers.push(real[k] ** 2 + imaginary[k] ** 2);
+  }
+  return { frequencies, powers, step: fs / n };
+}
+
 export function estimate(pulse, fs = 30) {
-  if (pulse.length < fs * 10 || pulse.some(v => !Number.isFinite(v))) return null;
+  if (pulse.length < fs * 5 || pulse.some(v => !Number.isFinite(v))) return null;
   const clean = bandpass(detrend(pulse), fs), spread = std(clean);
   if (spread < 1e-10) return null;
   const x = clean.map(v => v / spread);
   const taper = x.map((v, i) => v * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (x.length - 1))));
-  const frequencies = [], powers = [], step = 1 / 120;
-  for (let f = 40 / 60; f <= 200 / 60; f += step) {
-    let re = 0, im = 0;
-    for (let i = 0; i < taper.length; i++) { const a = 2 * Math.PI * f * i / fs; re += taper[i] * Math.cos(a); im -= taper[i] * Math.sin(a); }
-    frequencies.push(f); powers.push(re * re + im * im);
-  }
+  const { frequencies, powers, step } = powerSpectrum(taper, fs);
   let peak = powers.indexOf(Math.max(...powers));
   let frequency = frequencies[peak];
   if (peak > 0 && peak < powers.length - 1) {
