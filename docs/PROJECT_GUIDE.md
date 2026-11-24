@@ -19,6 +19,8 @@ paired measurement error. No labels such as healthy/unhealthy are inferred.
 
 ## Classical algorithm
 
+Track face-mesh landmarks and extract forehead and cheek regions. Filter skin
+pixels and adapt each region's spatial weights to the recent pulse frequency.
 Uniformly resample timestamped RGB traces to 30 Hz. For overlapping 1.6-second
 windows normalize each channel by its local mean. Form S1 = G−B and
 S2 = G+B−2R. Combine h = S1 + std(S1)/std(S2) × S2. Remove each window's mean
@@ -27,7 +29,7 @@ signal to 0.67–3.33 Hz before both autocorrelation and spectrum checks. Apply 
 evaluate spectral power between 40/60 and 200/60 Hz. Peak frequency × 60
 gives BPM. Autocorrelation close to that peak provides a periodicity check.
 
-The 0.5 BPM spectral grid is interpolation density, **not** true frequency
+The zero-padded FFT grid supports interpolation, **not** extra frequency
 resolution. A 20-second window has approximately 0.05 Hz = 3 BPM resolution.
 We do not claim that scanning a fine grid creates extra physiological detail.
 
@@ -36,9 +38,10 @@ We do not claim that scanning a fine grid creates extra physiological detail.
 The third-party FacePhys state-space neural model consumes one face crop,
 elapsed time, and recurrent hidden tensors. The worker carries returned states
 forward with the pinned input/output mapping. It returns a scalar pulse.
-Deep mode runs the pretrained SQI and PSD models on 450 uniformly resampled
-pulse samples. As in the reference pipeline, the learned SQI gates its learned
-PSD estimate; it does not also have to pass the independent classical
+Deep mode runs the pretrained SQI and PSD models on 450 consecutive raw
+pulse outputs in a separate worker. The rate is corrected by dividing the
+30 Hz-trained PSD output by 30 times the actual mean frame interval. As in the reference pipeline, the learned SQI gates its learned
+PSD estimate (SQI > 0.38); it does not also have to pass the independent classical
 estimator's quality gate. BPM must be finite, within 40–200, and associated
 with a recently detected face. Workers prevent numerical processing from
 blocking interface input. LiteRT needs a classic worker because its generated
