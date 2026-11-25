@@ -8,6 +8,7 @@ from .vitals import breathing, variability
 from .tracking import FrameClock
 from .vision import FaceVision, TemporalAmplifier
 from .facephys import FacePhys
+from .classical import estimate_rgb
 
 
 class Session:
@@ -44,7 +45,7 @@ class Session:
         started = time.perf_counter(); self.last_used = time.monotonic()
         dt = (now - self.last_frame) / 1000 if self.last_frame is not None else 1 / 30
         self.last_frame = now
-        if dt > .75:
+        if dt > 2.0:
             self.clear_window()
         face = self.vision.process(image, now, self.last_good_bpm)
         if face is None:
@@ -90,10 +91,11 @@ class Session:
         recent = [row for row in rows if rows[-1][0] - row[0] <= 20000]
         uniform = resample(recent)
         pulse = pos(uniform) if self.method == 'pos' else uniform[:, 0]
-        result = estimate(pulse)
+        result = estimate_rgb(rows) if self.method == 'pos' else None
         if self.method == 'deep':
             raw = rows[-450:]
-            interval = (raw[-1][0] - raw[0][0]) / 449000
+            # The reference corrects PSD using the *current* smoothed dt.
+            interval = self.clock.dt
             learned = self.model.analyze([row[1][0] for row in raw], interval)
             if result is None:
                 wave = bandpass(np.array([row[1][0] for row in raw]))

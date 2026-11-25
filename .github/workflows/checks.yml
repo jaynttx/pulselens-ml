@@ -27,3 +27,12 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python scripts/check_models.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/checkout@v4
+        with:
+          repository: xan-antx/pulseLens
+          ref: e7bdd94cbe686611eb37f817bbdf48b8d770b057
+          path: .reference
+      - run: python scripts/compare_reference.py --upstream .reference

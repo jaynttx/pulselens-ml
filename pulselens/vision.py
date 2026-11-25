@@ -26,15 +26,16 @@ def resize_crop(image, box, size):
 
 
 class SkinSampler:
-    def __init__(self):
+    def __init__(self, size=32):
+        self.size = size
         self.history = [deque(maxlen=64) for _ in range(3)]
-        self.weights = [np.ones(256) for _ in range(3)]
+        self.weights = [np.ones(size * size) for _ in range(3)]
         self.frames = 0
 
     def sample(self, image, patches, bpm, now):
         total = np.zeros(3); mass = 0.
         for index, box in enumerate(patches):
-            rgb = resize_crop(image, box, 16).reshape(-1, 3)
+            rgb = resize_crop(image, box, self.size).reshape(-1, 3)
             sums = np.maximum(rgb.sum(axis=1), 1)
             rn, gn = rgb[:, 0] / sums, rgb[:, 1] / sums
             mask = (sums >= 60) & (rn > .35) & (rn < .6) & (gn > .25) & (gn < .4)
@@ -77,7 +78,7 @@ class FaceVision:
             patches = [bounds(points[ids], 4) for ids in PATCHES]
         box = self.tracker.update(raw)
         x, y, w, h = box
-        face = resize_crop(image, [x, y - h * .24, w, h * 1.2], 36)
+        face = np.rint(np.clip(resize_crop(image, [x, y - h * .24, w, h * 1.2], 36), 0, 255)).astype(np.uint8)
         rgb = self.skin.sample(image, patches, bpm, now) if patches else resize_crop(image, box, 32).mean(axis=(0, 1))
         if rgb is None:
             return None

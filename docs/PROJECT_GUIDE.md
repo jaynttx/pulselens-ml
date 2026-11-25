@@ -14,9 +14,10 @@ unbounded inference queues.
 `vision.py` uses the pretrained MediaPipe pretrained face-landmark model to identify forehead and
 cheeks. A skin-colour mask excludes background pixels. Adaptive spatial
 weights favour locations that follow the recent pulse frequency.
-`signals.py` resamples timestamps, performs overlapping 1.6-second POS, detrends,
-filters at 0.67–3.33 Hz, applies a Hann taper and computes an FFT. A spectral
-concentration and autocorrelation check rejects noisy windows. Zero padding
+`classical.py` keeps the reference's 256-sample buffer and 48-frame POS projection.
+It removes a rolling mean, applies an FFT passband, then combines a Hamming-window
+spectral peak with autocorrelation. Its confidence gate matches the reference.
+`signals.py` supplies shared resampling and longer research-window helpers. Zero padding
 supports interpolation but does not add physical frequency resolution.
 
 `face_models.py` uses Python LiteRT CPU inference for the same pretrained
@@ -67,3 +68,5 @@ JPEG frames to the local server.
 - Why keep JavaScript? Browser webcam access and chart rendering require a web
   client; the numerical and ML logic lives in Python.
 - Where is data sent? Only to the user's loopback Python process, not a remote API.
+
+The current validation and its limits are documented in VERIFICATION.md.

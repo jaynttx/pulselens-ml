@@ -76,7 +76,9 @@ function updateView() {
 window.addEventListener('hashchange', updateView);
 
 async function requestJSON(path, options = {}) {
-  const response = await fetch(path, { ...options, cache: 'no-store' });
+  let response;
+  try { response = await fetch(path, { ...options, cache: 'no-store' }); }
+  catch { throw new Error('Python server is not reachable. Keep its Terminal open and run python app.py --port ' + (location.port || '4173') + '.'); }
   let data;
   try { data = await response.json(); }
   catch { throw new Error('Start the Python server with python app.py, then open its localhost address.'); }
@@ -220,7 +222,7 @@ function applyResult(result) {
     readings.push({ t: performance.now(), bpm, quality: result.quality, method, sqi: result.learnedSqi,
       breathing: respiratory?.rate, rmssd: variability?.rmssd, sdnn: variability?.sdnn });
     if (readings.length > 1800) readings.shift();
-    $('bpm').textContent = bpm.toFixed(0); $('reading-status').textContent = 'Stable experimental estimate'; $('reading-status').classList.add('good');
+    $('bpm').textContent = bpm.toFixed(0); $('reading-status').textContent = 'Experimental pulse estimate'; $('reading-status').classList.add('good');
     const values = readings.map(r => r.bpm);
     $('min').textContent = Math.min(...values).toFixed(0); $('average').textContent = mean(values).toFixed(0); $('max').textContent = Math.max(...values).toFixed(0);
     $('guidance').textContent = 'Your signal is periodic and stable. Keep the same position for a longer observation.';

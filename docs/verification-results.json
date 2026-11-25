@@ -1,0 +1,51 @@
+{
+  "date": "2026-11-25",
+  "scope": "Implementation and controlled-input verification; live-camera human accuracy remains unverified.",
+  "algorithm_comparison": {
+    "scope": "Controlled algorithm/model-contract comparison; not live human accuracy.",
+    "reference_revision": "e7bdd94cbe686611eb37f817bbdf48b8d770b057",
+    "classical": {
+      "cases": 21,
+      "decisions_match": true,
+      "max_bpm_difference": 2.842170943040401e-14,
+      "max_confidence_difference": 9.992007221626409e-16
+    },
+    "neural": {
+      "frames": 480,
+      "max_pulse_difference": 0.0,
+      "max_projection_difference": 0.0,
+      "sqi_difference": 0.0,
+      "bpm_difference": 0.0
+    }
+  },
+  "motion_test": {
+    "scope": "Controlled motion on a public static portrait; not live heart-rate validation.",
+    "methods": {
+      "pos": {
+        "frames": 1900,
+        "detected_frames": 1880,
+        "intentional_occluded_frames": 20,
+        "retained_samples": 1781,
+        "analysis_updates": 58,
+        "pulse_window_seconds": 60.0,
+        "color_window_seconds": 60.0,
+        "median_processing_ms": 11.77,
+        "p95_processing_ms": 12.797,
+        "elapsed_seconds": 23.72
+      },
+      "deep": {
+        "frames": 1900,
+        "detected_frames": 1880,
+        "intentional_occluded_frames": 20,
+        "retained_samples": 1779,
+        "analysis_updates": 49,
+        "pulse_window_seconds": 59.9737936912167,
+        "color_window_seconds": 60.0,
+        "median_processing_ms": 3.896,
+        "p95_processing_ms": 4.471,
+        "elapsed_seconds": 7.58
+      }
+    }
+  },
+  "motion_fixture_source": "https://storage.googleapis.com/mediapipe-assets/portrait.jpg"
+}
