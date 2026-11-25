@@ -46,7 +46,7 @@ do not disable HTTPS verification. The model downloader uses certifi roots.
 | `pulselens/face_models.py` | CPU adapters for pretrained BlazeFace and 478-point face landmarks |
 | `pulselens/vision.py` | Face regions, forehead/cheek skin regions, adaptive pixel weights, amplification |
 | `pulselens/tracking.py` | Kalman smoothing and frame timing |
-| `pulselens/classical.py` | Reference-profile POS, rolling mean, FFT bandpass, Hamming spectrum and autocorrelation fusion |
+| `pulselens/classical.py` | Live timestamp-corrected POS and a separate pinned reference-profile estimator |
 | `pulselens/signals.py` | Shared resampling and long-window research-signal helpers |
 | `pulselens/facephys.py` | Python LiteRT tensor adapter, recurrent state, projection, SQI/PSD |
 | `pulselens/vitals.py` | Respiratory proxy and pulse-rate variability |
@@ -68,15 +68,20 @@ A web browser needs this small client-side camera/interface layer.
 ## Research approach
 
 - Classical: MediaPipe face landmarks → skin-filtered 32×32 forehead/cheek regions →
-  256-sample colour buffer → overlapping 48-frame POS → rolling-mean removal →
-  FFT bandpass → Hamming-window FFT/autocorrelation fusion. These settings match
-  the pinned reference; 150 captured samples are required before estimating.
+  20-second rolling colour window → timestamp resampling to 30 Hz → overlapping
+  1.6-second POS with overlap normalization → detrending / bandpass → tapered
+  spectrum with autocorrelation quality checks. Live estimation needs at least
+  10 seconds, 8 captured frames per second and no gaps over 0.5 seconds.
+  The separate `estimate_rgb` function retains the pinned 256-frame reference
+  profile for reproducible comparisons; it is not the live estimator.
 - Neural: BlazeFace → Kalman-smoothed expanded 36×36 RGB crop → pretrained
   FacePhys recurrent inference → 450 raw pulse samples → learned SQI/PSD, with
   correction with the latest smoothed frame interval, matching the reference. Learned SQI above 0.38 gates neural readings.
 - Breathing uses a separate 30-second colour window. Pulse-rate variability
   needs about 60 seconds and consistent beat intervals. Panels show progress;
-  stopping preserves previous results with clear historical labels.
+  stopping preserves previous results with clear historical labels. The respiratory
+  trace can appear before a rate passes its quality gate. The session trend shows
+  accepted readings on a time axis with an automatically fitted BPM scale.
 
 The same research methods and pretrained assets are retained. Rewriting an
 implementation does not guarantee identical numerical outputs or performance.
@@ -128,7 +133,7 @@ prototype, not a medical device or a basis for diagnoses.
 ## Reference comparison
 
 See `docs/VERIFICATION.md` and `docs/verification-results.json`. The classical
-Python estimator was compared against the actual pinned TypeScript estimator
+reference-profile Python estimator was compared against the actual pinned TypeScript estimator
 on 21 controlled RGB traces. A separate tensor-by-name runner checked 480
 neural frames, feature projections, SQI and PSD against the Python adapter.
 These compare processing semantics, not live-human measurement accuracy.

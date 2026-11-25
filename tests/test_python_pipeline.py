@@ -233,3 +233,38 @@ class CpuFaceAdapterTests(unittest.TestCase):
         result = sample_grid(image, np.array([[-2., 1.5]]), np.array([[1., 1.5]]))
         np.testing.assert_allclose(result[0, 0], [0, 0, 0]); np.testing.assert_allclose(result[0, 1], [100, 100, 100])
         np.testing.assert_allclose(sigmoid(np.array([0.])), [.5])
+
+class LiveCaptureRegressionTests(unittest.TestCase):
+    def test_live_pos_rates_with_irregular_frames_and_lighting(self):
+        from pulselens.classical import estimate_live_rgb
+        for bpm in [48, 60, 77, 120, 150, 180]:
+            with self.subTest(bpm=bpm):
+                t = np.cumsum(np.tile([.025, .045, .033, .08], 180))
+                pulse = np.sin(2 * np.pi * bpm / 60 * t)
+                light = 1 + .12 * np.sin(2 * np.pi * .15 * t)
+                rgb = np.column_stack([130 * light + .1 * pulse, 100 * light + .8 * pulse, 75 * light - .1 * pulse])
+                rows = [(x * 1000, value.tolist()) for x, value in zip(t, rgb)]
+                result = estimate_live_rgb(rows)
+                self.assertTrue(result['valid'])
+                self.assertAlmostEqual(result['bpm'], bpm, delta=1)
+                self.assertGreater(result['windowSeconds'], 19)
+                self.assertLessEqual(result['windowSeconds'], 20)
+
+    def test_live_pos_does_not_invent_a_rate_for_missing_or_flat_signal(self):
+        from pulselens.classical import estimate_live_rgb
+        self.assertIsNone(estimate_live_rgb([(0, [130, 100, 75]), (20000, [130, 100, 75])]))
+        self.assertIsNone(estimate_live_rgb([(i * 1000 / 30, [130, 100, 75]) for i in range(600)]))
+        t = np.arange(200) / 30
+        self.assertIsNone(estimate_live_rgb([(x * 1000, [130, 100 + np.sin(x), 75]) for x in t]))
+
+    def test_respiratory_preview_before_rate_and_serializable_trace(self):
+        import json
+        t = np.arange(1801) / 30
+        rows = [(x * 1000, [130, 100 + np.sin(2 * np.pi * .3 * x), 75]) for x in t]
+        preview = breathing(rows[:451])
+        self.assertFalse(preview['valid']); self.assertIsNone(preview['rate'])
+        self.assertGreater(len(preview['waveform']), 100)
+        result = breathing(rows)
+        self.assertTrue(result['valid']); self.assertAlmostEqual(result['rate'], 18, delta=.5)
+        self.assertLessEqual(len(result['waveform']), 601)
+        json.dumps(result, allow_nan=False)

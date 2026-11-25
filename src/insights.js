@@ -1,17 +1,18 @@
 // Each research measurement has its own readiness/quality result. A hidden BPM
 // must not hide a valid respiratory estimate or erase a completed session.
 export class ResearchPanels {
-  constructor(find) { this.find = find; this.reset(false); }
+  constructor(find, drawTrace = () => {}) { this.find = find; this.drawTrace = drawTrace; this.reset(false); }
   reset(draw = true) {
     this.capture = { colorSeconds: 0, pulseSeconds: 0 };
-    this.current = {}; this.last = {}; this.paused = false; this.active = false;
+    this.current = {}; this.last = {}; this.trace = []; this.paused = false; this.active = false;
     if (draw) this.render();
   }
-  clearWindow() { this.capture = { colorSeconds: 0, pulseSeconds: 0 }; this.current = {}; this.render(); }
+  clearWindow() { this.capture = { colorSeconds: 0, pulseSeconds: 0 }; this.current = {}; this.trace = []; this.render(); }
   progress(capture) { this.capture = capture; this.paused = false; this.active = true; this.render(); }
   update(result) {
     this.active = true;
     this.capture = result.capture;
+    this.trace = result.breathing?.waveform || [];
     this.current = { breathing: result.breathing?.valid ? result.breathing : null,
       variability: result.variability?.valid ? result.variability : null };
     for (const key of ['breathing', 'variability']) if (this.current[key]) this.last[key] = this.current[key];
@@ -19,6 +20,7 @@ export class ResearchPanels {
   }
   stop() { this.paused = true; this.render(); }
   render() {
+    this.drawTrace(this.trace, this.paused);
     const put = (id, text) => { if (this.find(id).textContent !== text) this.find(id).textContent = text; };
     const { colorSeconds = 0, pulseSeconds = 0 } = this.capture;
     const breathing = this.current.breathing || this.last.breathing;

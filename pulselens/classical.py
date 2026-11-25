@@ -4,6 +4,30 @@ Written with NumPy rather than the reference's TypeScript routines. This is
 an analytical baseline, not a trained model or a medical-quality guarantee.
 """
 import numpy as np
+from .signals import resample, pos, estimate
+
+
+def estimate_live_rgb(rows):
+    """POS on a time-based, uniformly sampled window for live webcam capture.
+
+    Keep estimate_rgb below as the pinned reference profile for comparisons.
+    A frame count is not a duration when HTTP/camera frames arrive unevenly.
+    """
+    if len(rows) < 2:
+        return None
+    recent = [row for row in rows if rows[-1][0] - row[0] <= 20000]
+    elapsed = (recent[-1][0] - recent[0][0]) / 1000
+    if elapsed < 10:
+        return None
+    intervals = np.diff([row[0] for row in recent]) / 1000
+    if np.any(intervals <= 0) or (len(recent) - 1) / elapsed < 8 or intervals.max() > .5:
+        return None
+    # Overlap-normalized POS avoids amplifying the middle of a rolling buffer;
+    # detrending and a tapered spectrum suppress window-edge / slow-light drift.
+    result = estimate(pos(resample(recent)))
+    if result:
+        result['windowSeconds'] = elapsed
+    return result
 
 
 def extract_pos(rgb):

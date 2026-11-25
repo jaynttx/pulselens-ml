@@ -5,7 +5,9 @@ import { acquireCamera } from './camera.js';
 import { ResearchPanels } from './insights.js';
 
 const $ = id => document.getElementById(id);
-const researchPanels = new ResearchPanels($);
+const researchPanels = new ResearchPanels($, (values, paused) => plot($('breathing-wave'), values, {
+  empty: paused ? 'Session stopped · no respiratory trace' : 'Collecting facial colour for the respiratory trace'
+}));
 let method = 'pos', running = false, starting = false, stream = null;
 let frameRequest = 0, runId = 0, pythonSession = null, pythonBusy = false;
 let rows = [], readings = [], pulseLog = [], observations = [];
@@ -27,7 +29,7 @@ function displayInvalid(text) {
   $('bpm').textContent = '—'; $('reading-status').textContent = text; $('reading-status').classList.remove('good');
 }
 function chartReset() {
-  plot($('wave')); plot($('spectrum')); plot($('trend'), readings.slice(-180).map(r => r.bpm), { min: 40, max: 200 });
+  plot($('wave')); plot($('spectrum')); renderTrend();
   $('quality').textContent = '—'; $('quality-fill').style.width = '0%'; $('peak-label').textContent = '— Hz';
 }
 function resetSignals() {
@@ -199,9 +201,9 @@ async function tick(now) {
   } finally { if (token === runId) pythonBusy = false; }
 }
 
-function applyResult(result) {
+export function applyResult(result) {
   lastResult = result;
-  if (!result) { displayInvalid('No periodic signal yet'); validStreak = 0; return; }
+  if (!result) { displayInvalid('Collecting a usable pulse window'); validStreak = 0; renderCharts(); return; }
   if (result.learnedSqi != null) {
     $('learned-sqi').textContent = result.learnedSqi.toFixed(2);
     $('sqi-status').textContent = result.learnedSqi > 0.38 ? 'Learned SQI passed. Rate comes from the pretrained spectrum model.' : 'Learned SQI too low; reading hidden.';
@@ -209,7 +211,7 @@ function applyResult(result) {
   const q = Math.round(result.quality * 100);
   $('quality').textContent = `${q}%`; $('quality-fill').style.width = `${q}%`;
   $('peak-label').textContent = `${result.frequency.toFixed(2)} Hz`;
-  $('wave-label').textContent = method === 'pos' ? 'POS · 20 s rolling window' : 'FacePhys · predicted pulse';
+  $('wave-label').textContent = method === 'pos' ? `POS · ${(result.windowSeconds || 0).toFixed(1)} s window` : 'FacePhys · predicted pulse';
   validStreak = result.valid ? validStreak + 1 : 0;
   if (validStreak >= (method === 'deep' ? 1 : 2)) {
     // Median of recent accepted values suppresses isolated fluctuations without
@@ -237,7 +239,16 @@ function applyResult(result) {
 function renderCharts() {
   plot($('wave'), lastResult?.waveform?.slice(-300) || []);
   plot($('spectrum'), lastResult?.powers || [], { min: 0, max: 1, bars: true });
-  plot($('trend'), readings.slice(-180).map(r => r.bpm), { min: 40, max: 200 });
+  renderTrend();
+  plot($('breathing-wave'), researchPanels.trace, { empty: 'Collecting facial colour for the respiratory trace' });
+}
+function renderTrend() {
+  const recent = readings.slice(-180), values = recent.map(r => r.bpm);
+  const lower = values.length ? Math.max(40, Math.floor(Math.min(...values) - 8)) : 40;
+  const upper = values.length ? Math.min(200, Math.ceil(Math.max(...values) + 8)) : 200;
+  plot($('trend'), values, { min: lower, max: upper, markers: true, times: recent.map(r => r.t),
+    empty: 'Waiting for the first accepted pulse estimate' });
+  $('trend-status').textContent = values.length ? `${recent.length} accepted readings · ${lower}–${upper} BPM` : 'No accepted readings yet';
 }
 
 function download(filename, content) {
@@ -279,6 +290,10 @@ $('consent').addEventListener('change', () => { if (!$('consent').checked && (ru
 document.addEventListener('visibilitychange', () => { if (document.hidden && (running || starting)) stop('Session stopped because this tab became hidden.'); });
 window.addEventListener('pagehide', () => { stream?.getTracks().forEach(track => track.stop()); endPythonSession(pythonSession); });
 window.addEventListener('resize', renderCharts);
+if (typeof ResizeObserver !== 'undefined') {
+  const chartObserver = new ResizeObserver(renderCharts);
+  ['wave', 'spectrum', 'trend', 'breathing-wave'].forEach(id => chartObserver.observe($(id)));
+}
 function updateInspector(output) {
   lastVisualization = output;
   ['ssm1', 'ssm2', 'ssm3', 'ssm4', 'proj'].forEach((key, i) => {

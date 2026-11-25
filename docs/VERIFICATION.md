@@ -1,5 +1,13 @@
 # Processing verification — 25 November 2026
 
+Live-capture update: the website now uses `estimate_live_rgb` with timestamp
+resampling, a 10–20 second window, overlap-normalized POS and shared spectral /
+autocorrelation quality checks. The pinned `estimate_rgb` comparison profile
+below is retained separately. New regression tests cover 48, 60, 77, 120, 150
+and 180 BPM under irregular capture intervals and illumination drift; respiratory
+trace serialization and frontend trend rendering in both modes are also checked.
+These synthetic checks do not determine the correct BPM for a live user.
+
 This report verifies implementation behaviour on controlled inputs. It does
 **not** establish live-human accuracy or identical camera behaviour to the
 original. Raw results are in `verification-results.json`.

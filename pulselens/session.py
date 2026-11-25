@@ -8,7 +8,7 @@ from .vitals import breathing, variability
 from .tracking import FrameClock
 from .vision import FaceVision, TemporalAmplifier
 from .facephys import FacePhys
-from .classical import estimate_rgb
+from .classical import estimate_live_rgb
 
 
 class Session:
@@ -88,10 +88,7 @@ class Session:
 
     def analyze(self):
         rows = list(self.rows); rgb_rows = list(self.rgb_rows)
-        recent = [row for row in rows if rows[-1][0] - row[0] <= 20000]
-        uniform = resample(recent)
-        pulse = pos(uniform) if self.method == 'pos' else uniform[:, 0]
-        result = estimate_rgb(rows) if self.method == 'pos' else None
+        result = estimate_live_rgb(rows) if self.method == 'pos' else None
         if self.method == 'deep':
             raw = rows[-450:]
             # The reference corrects PSD using the *current* smoothed dt.

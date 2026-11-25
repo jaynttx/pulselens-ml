@@ -37,3 +37,15 @@ test('quality loss labels previous values rather than claiming a fresh estimate'
   assert.equal(text('breathing-rate'), '18.0'); assert.match(text('breathing-status'), /Last accepted window/);
   panels.reset(); assert.equal(text('breathing-rate'), '—'); assert.equal(text('hrv-rmssd'), '—');
 });
+test('respiratory trace draws before rate acceptance and survives stop', () => {
+  const elements = new Map(); const drawn = [];
+  const panels = new ResearchPanels(id => {
+    if (!elements.has(id)) elements.set(id, { textContent: '' });
+    return elements.get(id);
+  }, values => drawn.push([...values]));
+  panels.update({ capture: { colorSeconds: 15, pulseSeconds: 15 }, breathing: { valid: false, waveform: [0, 1, 0, -1] } });
+  assert.deepEqual(drawn.at(-1), [0, 1, 0, -1]);
+  assert.equal(elements.get('breathing-rate').textContent, '—');
+  panels.stop(); assert.deepEqual(drawn.at(-1), [0, 1, 0, -1]);
+  panels.reset(); assert.deepEqual(drawn.at(-1), []);
+});

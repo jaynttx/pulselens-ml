@@ -16,19 +16,26 @@ def slow_filter(values, fs=30, low=.08, high=.6):
 
 
 def breathing(rows, fs=30):
-    if len(rows) < 2 or rows[-1][0] - rows[0][0] < 30000:
+    if len(rows) < 2 or rows[-1][0] - rows[0][0] < 5000:
         return None
     green = resample(rows, fs)[:, 1]
     if green.std() < 1e-8:
         return None
     signal = slow_filter(detrend(green), fs)[fs * 3:]
+    spread = signal.std()
+    if spread < 1e-10:
+        return None
+    trace = dict(waveform=(signal / spread)[::3].tolist(), sampleRate=fs / 3,
+                 seconds=len(signal) / fs)
+    if rows[-1][0] - rows[0][0] < 30000:
+        return dict(rate=None, quality=0., valid=False, **trace)
     rates = np.arange(6, 30.01, .25)
     phases = 2 * np.pi * rates[:, None] / 60 * np.arange(len(signal)) / fs
     tapered = signal * np.hanning(len(signal))
     powers = (np.cos(phases) @ tapered) ** 2 + (np.sin(phases) @ tapered) ** 2
     peak = int(powers.argmax()); rate = rates[peak]
     quality = float(powers[np.abs(rates - rate) <= 2].sum() / max(powers.sum(), 1e-12))
-    return dict(rate=float(rate), quality=quality, valid=bool(quality > .55 and 0 < peak < len(rates) - 1))
+    return dict(rate=float(rate), quality=quality, valid=bool(quality > .55 and 0 < peak < len(rates) - 1), **trace)
 
 
 def variability(pulse, fs=30, expected_bpm=None):

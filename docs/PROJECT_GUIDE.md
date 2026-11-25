@@ -14,9 +14,13 @@ unbounded inference queues.
 `vision.py` uses the pretrained MediaPipe pretrained face-landmark model to identify forehead and
 cheeks. A skin-colour mask excludes background pixels. Adaptive spatial
 weights favour locations that follow the recent pulse frequency.
-`classical.py` keeps the reference's 256-sample buffer and 48-frame POS projection.
-It removes a rolling mean, applies an FFT passband, then combines a Hamming-window
-spectral peak with autocorrelation. Its confidence gate matches the reference.
+For live capture, `classical.py:estimate_live_rgb` uses a 20-second rolling window,
+resamples timestamps at 30 Hz and applies the overlap-normalized 1.6-second POS
+projection in `signals.py`. Bandpass filtering, a Hann-tapered spectrum and
+autocorrelation quality checks produce the estimate after at least 10 seconds.
+This avoids treating unevenly arriving frames as a uniformly timed signal.
+`classical.py:estimate_rgb` separately retains the pinned 256-frame reference
+profile for comparisons. Those comparison results do not validate live accuracy.
 `signals.py` supplies shared resampling and longer research-window helpers. Zero padding
 supports interpolation but does not add physical frequency resolution.
 
