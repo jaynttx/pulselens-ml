@@ -1,0 +1,4 @@
+# Python 3.11–3.13; Google LiteRT includes macOS/Windows/Linux CPU wheels.
+numpy>=1.26,<2.3
+certifi>=2024.2.2
+ai-edge-litert==2.4.0

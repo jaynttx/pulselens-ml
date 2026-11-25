@@ -37,16 +37,3 @@ test('quality loss labels previous values rather than claiming a fresh estimate'
   assert.equal(text('breathing-rate'), '18.0'); assert.match(text('breathing-status'), /Last accepted window/);
   panels.reset(); assert.equal(text('breathing-rate'), '—'); assert.equal(text('hrv-rmssd'), '—');
 });
-test('worker computes respiration even when flat pulse produces no BPM result', async () => {
-  let response;
-  globalThis.self = { postMessage(data) { response = data; } };
-  await import('../src/analysis.worker.js?independent-insights');
-  const rows = Array.from({ length: 1801 }, (_, i) => ({ t: i * 1000 / 30, v: [100, 100, 100] }));
-  const rgbRows = rows.map((row, i) => ({ t: row.t, v: [130, 100 + 2 * Math.sin(2 * Math.PI * 0.3 * i / 30), 75] }));
-  self.onmessage({ data: { method: 'pos', rows, rgbRows, id: 7 } });
-  assert.equal(response.result, null);
-  assert.ok(response.insights.breathing.valid);
-  assert.ok(Math.abs(response.insights.breathing.rate - 18) < 0.5);
-  assert.equal(response.insights.capture.pulseSeconds, 60);
-  delete globalThis.self;
-});

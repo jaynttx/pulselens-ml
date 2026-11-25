@@ -1,29 +1,21 @@
-import { mean, std, clamp, metrics, csv } from './signal.js';
+import { mean, std, clamp, metrics, csv } from './ui-utils.js';
 import { plot } from './charts.js';
-import { clearPanel, heatmap, trajectory, TemporalAmplifier } from './visuals.js';
-import { FaceRegionTracker, NeuralFaceTracker, NeuralFrameClock, clippedBox } from './tracking.js';
-import { checkNeuralRuntime } from './diagnostics.js';
+import { clearPanel, heatmap, trajectory } from './visuals.js';
 import { acquireCamera } from './camera.js';
 import { ResearchPanels } from './insights.js';
-import { faceRegions, SkinSampler } from './skin.js';
 
 const $ = id => document.getElementById(id);
 const researchPanels = new ResearchPanels($);
-let method = 'pos', running = false, starting = false, stream = null, detector = null, landmarkDetector = null;
-let analysisWorker = null, deepWorker = null, spectrumWorker = null, frameRequest = 0, runId = 0;
+let method = 'pos', running = false, starting = false, stream = null;
+let frameRequest = 0, runId = 0, pythonSession = null, pythonBusy = false;
 let rows = [], readings = [], pulseLog = [], observations = [];
 let previousBox = null, lastVideoTime = -1, lastFrameAt = 0, lastFaceAt = 0;
-let lastAnalysisAt = 0, startedAt = 0, deepBusy = false, analysisBusy = false;
+let lastAnalysisAt = 0, startedAt = 0;
 let goodFrames = 0, lastResult = null, validStreak = 0, frameTimes = [], rawAccepted = [];
 let lastDeepFrameAt = 0;
 let captureEpoch = 0, pendingAnalysis = null, learnedSqi = null, lastVisualization = null;
 let offlinePreparing = false;
 let stateHistory = [[], [], [], [], []], sessionMethod = method;
-const amplifier = new TemporalAmplifier();
-const skinSampler = new SkinSampler();
-const faceTracker = new FaceRegionTracker();
-const neuralTracker = new NeuralFaceTracker();
-const neuralClock = new NeuralFrameClock();
 let missingSince = 0;
 const crop = document.createElement('canvas'); crop.width = crop.height = 36;
 const cropContext = crop.getContext('2d', { willReadFrequently: true });
@@ -41,9 +33,7 @@ function chartReset() {
 function resetSignals() {
   captureEpoch++; pendingAnalysis = null; learnedSqi = null;
   rows = []; lastResult = null; goodFrames++; validStreak = 0; rawAccepted = [];
-  rgbRows = []; lastDeepFrameAt = 0; amplifier.reset(); researchPanels.clearWindow();
-  skinSampler.reset(); neuralClock.reset();
-  if (deepWorker && running) deepWorker.postMessage({ type: 'reset' });
+  rgbRows = []; lastDeepFrameAt = 0; researchPanels.clearWindow();
   lastAnalysisAt = 0; chartReset();
 }
 let rgbRows = [];
@@ -58,7 +48,7 @@ function resetInspector() {
   clearPanel($('state-trajectory'), 'Deep learning only'); clearPanel($('amplified-video'), 'Amplification off');
 }
 function resetSession() {
-  readings = []; resetResearchValues(); resetSignals(); faceTracker.reset(); neuralTracker.reset(); missingSince = 0; pulseLog = []; previousBox = null; frameTimes = [];
+  readings = []; resetResearchValues(); resetSignals(); missingSince = 0; pulseLog = []; previousBox = null; frameTimes = [];
   lastFrameAt = 0; lastFaceAt = 0; lastVideoTime = -1; lastDeepFrameAt = 0;
   ['min', 'average', 'max'].forEach(id => $(id).textContent = '—');
   $('timer').textContent = '00:00'; $('export').disabled = true;
@@ -71,7 +61,7 @@ document.querySelectorAll('[data-method]').forEach(button => button.addEventList
   document.querySelectorAll('[data-method]').forEach(b => { b.classList.toggle('selected', b === button); b.setAttribute('aria-pressed', String(b === button)); });
   $('method-description').textContent = method === 'pos'
     ? 'POS projects facial colour changes to reduce shared lighting noise. No pulse model is required.'
-    : 'FacePhys is a pretrained state-space neural network. Its model assets load on first use; inference stays on your device.';
+    : 'FacePhys is a pretrained state-space neural network. Its model assets load on first use; Python runs inference on this computer.';
   message(method === 'deep' ? 'Deep learning selected. First start downloads the pretrained FacePhys model and runtime.' : 'Classical POS selected. Ready to start.');
   resetResearchValues(); resetInspector();
 }));
@@ -85,91 +75,35 @@ function updateView() {
 }
 window.addEventListener('hashchange', updateView);
 
-async function createDetector() {
-  const { FaceDetector, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/+esm');
-  const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
-  const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite';
-  const baseOptions = { modelAssetPath, delegate: 'GPU' };
-  const options = { baseOptions, runningMode: 'VIDEO', minDetectionConfidence: 0.5 };
-  try { return await FaceDetector.createFromOptions(vision, options); }
-  catch { baseOptions.delegate = 'CPU'; return FaceDetector.createFromOptions(vision, options); }
+async function requestJSON(path, options = {}) {
+  const response = await fetch(path, { ...options, cache: 'no-store' });
+  let data;
+  try { data = await response.json(); }
+  catch { throw new Error('Start the Python server with python app.py, then open its localhost address.'); }
+  if (!response.ok) throw new Error(data.error || `Python request failed (${response.status}).`);
+  return data;
 }
-
-async function createLandmarker() {
-  const { FaceLandmarker, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/+esm');
-  const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
-  const baseOptions = { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', delegate: 'GPU' };
-  const options = { baseOptions, runningMode: 'VIDEO', numFaces: 2, minFaceDetectionConfidence: 0.5, minTrackingConfidence: 0.5 };
-  try { return await FaceLandmarker.createFromOptions(vision, options); }
-  catch { baseOptions.delegate = 'CPU'; return FaceLandmarker.createFromOptions(vision, options); }
+function endPythonSession(id) {
+  if (id) fetch('/api/stop', { method: 'POST', headers: { 'X-Session-Id': id }, keepalive: true }).catch(() => {});
 }
-
-async function initializeDeep(token) {
-  // LiteRT's generated WASM loader calls importScripts: it needs a classic
-  // Worker. The worker itself uses dynamic import(), which is supported here.
-  const worker = new Worker(new URL('./deep.worker.js', import.meta.url));
-  deepWorker = worker;
-  spectrumWorker = new Worker(new URL('./spectrum.worker.js', import.meta.url));
-  await Promise.all([worker, spectrumWorker].map(current => new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Model loading timed out. Check your connection or local assets.')), 90000);
-    current.onerror = event => { clearTimeout(timeout); reject(new Error(event.message || 'Neural worker could not load.')); };
-    current.onmessage = ({ data }) => {
-      if (data.type === 'progress') message(data.message);
-      if (data.type === 'ready' || data.type === 'error') {
-        clearTimeout(timeout); data.type === 'ready' ? resolve() : reject(new Error(data.message));
-      }
-    };
-    current.postMessage({ type: 'init' });
-  })));
-  if (token !== runId) { worker.terminate(); return; }
-  worker.onmessage = spectrumWorker.onmessage = ({ data }) => {
-    if (token !== runId || !running) return;
-    if (data.type === 'error') { stop(); message('Deep learning error: ' + data.message, true); return; }
-    if (data.type === 'analysis') {
-      if (!pendingAnalysis || data.id !== goodFrames || pendingAnalysis.id !== data.id || data.epoch !== captureEpoch) return;
-      const result = pendingAnalysis.result; pendingAnalysis = null;
-      learnedSqi = clamp(data.sqi, 0, 1);
-      result.learnedSqi = learnedSqi;
-      result.valid = learnedSqi > 0.38 && data.bpm >= 40 && data.bpm <= 200 && performance.now() - lastFaceAt < 1500;
-      result.bpm = data.bpm;
-      const band = data.frequencies.map((frequency, i) => ({ frequency, power: data.powers[i] })).filter(p => p.frequency >= 40 / 60 && p.frequency <= 200 / 60);
-      result.frequencies = band.map(p => p.frequency);
-      const scale = Math.max(...band.map(p => p.power), 1e-12);
-      result.powers = band.map(p => p.power / scale);
-      result.quality = learnedSqi;
-      result.frequency = data.bpm / 60;
-      applyResult(result); return;
-    }
-    if (data.type === 'pulse') {
-      deepBusy = false;
-      if (data.epoch !== captureEpoch || performance.now() - lastFaceAt > 1500) return;
-      append({ t: data.t, v: [data.value] });
-      $('latency').textContent = `${data.latency.toFixed(1)} ms`;
-      if (data.visualization) updateInspector(data.visualization);
-    }
-  };
-  worker.onerror = spectrumWorker.onerror = () => { if (token === runId) { stop(); message('Deep inference failed. Restart the camera or select Classical POS.', true); } };
-}
-
 async function start() {
   if (running || starting) return;
-  if (offlinePreparing) { message('Wait for offline preparation to finish before opening the camera.'); return; }
+  if (offlinePreparing) { message('Wait for the Python model check to finish.'); return; }
   if (!$('consent').checked) { message('Please confirm consent for local webcam estimation before starting.', true); return; }
-  if (!navigator.mediaDevices?.getUserMedia) { message('Camera access requires localhost or HTTPS in a compatible browser.', true); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { message('Camera access requires localhost or HTTPS.', true); return; }
   starting = true; const token = ++runId;
-  $('start').disabled = true; $('start').textContent = 'Preparing…'; $('stop').disabled = false;
-  $('prepare-offline').disabled = true;
-  $('check-system').disabled = true;
+  $('start').disabled = true; $('start').textContent = 'Preparing Python…'; $('stop').disabled = false;
+  $('prepare-offline').disabled = true; $('check-system').disabled = true;
   document.querySelectorAll('[data-method]').forEach(b => b.disabled = true);
   resetSession();
-  message(method === 'deep' ? 'Loading the face detector and pretrained model. First use may take a minute.' : 'Loading the face detector. Your camera will request permission next.');
   try {
-    if (method === 'pos' && !landmarkDetector) landmarkDetector = await createLandmarker();
-    if (method === 'deep' && !detector) detector = await createDetector();
-    if (token !== runId) return;
-    if (method === 'deep') await initializeDeep(token);
-    if (token !== runId) return;
-    message('Waiting for camera permission. Choose Allow for this page in this browser.');
+    const health = await requestJSON('/api/health');
+    if (health.backend !== 'python') throw new Error('This is not the Python server. Run python app.py.');
+    message('Python is loading the face tracker and selected pulse model. First use may download weights.');
+    const created = await requestJSON('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ method, consent: true }) });
+    if (token !== runId) { endPythonSession(created.session); return; }
+    pythonSession = created.session;
+    message('Waiting for camera permission. Frames will be processed by Python on this Mac.');
     const acquired = await acquireCamera(constraints => navigator.mediaDevices.getUserMedia(constraints),
       { audio: false, video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: 'user' } }, () => token === runId);
     if (token !== runId) { acquired.getTracks().forEach(t => t.stop()); return; }
@@ -177,30 +111,14 @@ async function start() {
     if (token !== runId) { acquired.getTracks().forEach(t => t.stop()); return; }
     $('overlay').width = $('video').videoWidth; $('overlay').height = $('video').videoHeight;
     $('placeholder').hidden = true; document.querySelector('.camera-stage').classList.add('live');
-    $('capture-status').textContent = 'Camera live'; $('capture-status').classList.add('good');
-    analysisWorker = new Worker(new URL('./analysis.worker.js', import.meta.url), { type: 'module' });
-    analysisWorker.onmessage = ({ data }) => {
-      if (token !== runId || !running) return;
-      analysisBusy = false;
-      if (data.error) { stop(); message(data.error, true); return; }
-      if (data.id !== goodFrames || performance.now() - lastFaceAt > 1500) return;
-      if (data.insights) researchPanels.update(data.insights);
-      if (method === 'deep' && data.result) {
-        if (data.result.modelInput.length !== 450) return;
-        pendingAnalysis = data;
-        spectrumWorker.postMessage({ type: 'analyze', id: data.id, epoch: captureEpoch, dt: data.result.sampleDt, samples: data.result.modelInput }); return;
-      }
-      applyResult(data.result);
-    };
-    analysisWorker.onerror = () => { stop(); message('Signal analysis failed. Please restart the camera.', true); };
-    running = true; starting = false; startedAt = performance.now();
-    deepBusy = false; analysisBusy = false;
+    $('capture-status').textContent = 'Camera live · Python'; $('capture-status').classList.add('good');
+    running = true; starting = false; startedAt = performance.now(); pythonBusy = false;
     $('start').textContent = 'Camera running'; displayInvalid('Finding your face');
-    message('Keep your face still and evenly lit. Building the first pulse window.');
+    message('Python processing is active. Keep your face evenly lit while the signal builds.');
     frameRequest = requestAnimationFrame(tick);
   } catch (error) {
-    if (token === runId) { stop(); message(error.name === 'NotAllowedError' ? 'Camera permission was denied. Allow access in browser settings, then try again.' : error.message, true); }
-  } finally { if (token === runId && !running) restoreControls(); }
+    if (token === runId) { stop(); message(error.name === 'NotAllowedError' ? 'Camera permission denied. Allow it in this browser and try again.' : error.message, true); }
+  }
 }
 function restoreControls() {
   starting = false; $('start').disabled = false; $('start').textContent = 'Start new session'; $('stop').disabled = true;
@@ -211,8 +129,7 @@ function restoreControls() {
 function stop(text = 'Camera stopped. You can export your session or start a new one.') {
   ++runId; running = false; starting = false; cancelAnimationFrame(frameRequest);
   stream?.getTracks().forEach(track => track.stop()); stream = null;
-  $('video').srcObject = null; deepWorker?.terminate(); spectrumWorker?.terminate(); analysisWorker?.terminate();
-  deepWorker = null; spectrumWorker = null; analysisWorker = null; deepBusy = false; analysisBusy = false;
+  $('video').srcObject = null; endPythonSession(pythonSession); pythonSession = null; pythonBusy = false;
   $('placeholder').hidden = false; document.querySelector('.camera-stage').classList.remove('live');
   $('overlay').getContext('2d').clearRect(0, 0, $('overlay').width, $('overlay').height);
   $('capture-status').textContent = 'Camera off'; $('capture-status').classList.remove('good');
@@ -228,87 +145,56 @@ function append(row) {
   $('export').disabled = pulseLog.length === 0;
 }
 
-function tick(now) {
+const frameCanvas = document.createElement('canvas');
+const frameContext = frameCanvas.getContext('2d', { willReadFrequently: true });
+function paintPixels(canvas, rgb, size) {
+  const rgba = new Uint8ClampedArray(size * size * 4);
+  for (let i = 0; i < size * size; i++) { rgba.set(rgb.slice(i * 3, i * 3 + 3), i * 4); rgba[i * 4 + 3] = 255; }
+  const buffer = document.createElement('canvas'); buffer.width = buffer.height = size;
+  buffer.getContext('2d').putImageData(new ImageData(rgba, size, size), 0, 0);
+  canvas.getContext('2d').drawImage(buffer, 0, 0, canvas.width, canvas.height);
+}
+async function tick(now) {
   if (!running) return;
   frameRequest = requestAnimationFrame(tick);
-  if ($('video').currentTime === lastVideoTime || now - lastFrameAt < 30 || $('video').readyState < 2) return;
-  lastVideoTime = $('video').currentTime;
-  const dt = lastFrameAt ? (now - lastFrameAt) / 1000 : 1 / 30;
-  lastFrameAt = now; frameTimes.push(now); while (frameTimes.length && now - frameTimes[0] > 1000) frameTimes.shift();
+  const video = $('video');
+  if (pythonBusy || video.currentTime === lastVideoTime || now - lastFrameAt < 30 || video.readyState < 2) return;
+  const token = runId; pythonBusy = true;
+  lastVideoTime = video.currentTime; lastFrameAt = now;
+  frameTimes.push(now); while (frameTimes.length && now - frameTimes[0] > 1000) frameTimes.shift();
   $('fps').textContent = `${frameTimes.length} FPS`;
   const sec = Math.floor((now - startedAt) / 1000);
   $('timer').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
   try {
-    if (dt > 0.75) resetSignals();
-    const landmarks = method === 'pos' ? landmarkDetector.detectForVideo($('video'), now).faceLandmarks : null;
-    const regions = landmarks?.map(points => faceRegions(points, $('video').videoWidth, $('video').videoHeight));
-    const detected = regions ? regions.map(region => ({ boundingBox: { originX: region.box.x, originY: region.box.y, width: region.box.w, height: region.box.h } })) : detector.detectForVideo($('video'), now).detections;
+    const scale = Math.min(640 / video.videoWidth, 480 / video.videoHeight, 1);
+    frameCanvas.width = Math.round(video.videoWidth * scale); frameCanvas.height = Math.round(video.videoHeight * scale);
+    frameContext.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
+    // Lossless RGBA bytes preserve subtle colour changes; no JPEG compression.
+    const pixels = frameContext.getImageData(0, 0, frameCanvas.width, frameCanvas.height).data;
+    const data = await requestJSON('/api/frame', { method: 'POST', headers: {
+      'Content-Type': 'application/octet-stream', 'X-Session-Id': pythonSession,
+      'X-Frame-Width': String(frameCanvas.width), 'X-Frame-Height': String(frameCanvas.height),
+      'X-Frame-Time': String(now), 'X-Amplify': String($('amplify').checked), 'X-Gain': $('gain').value
+    }, body: pixels });
+    if (token !== runId || !running) return;
     const context = $('overlay').getContext('2d'); context.clearRect(0, 0, $('overlay').width, $('overlay').height);
-    if (detected.length !== 1) {
-      if (!missingSince) missingSince = now;
-      if (detected.length > 1 || now - missingSince > 1500) {
-        if (rows.length || rgbRows.length) resetSignals();
-        previousBox = null; lastFaceAt = 0; resetInspector();
-      }
-      displayInvalid(detected.length ? 'One person at a time' : 'Face not detected');
-      $('guidance').textContent = detected.length ? 'Only one person should be visible in the camera.' : 'Bring your face into view and face the camera.'; return;
-    }
-    missingSince = 0;
-    const b = detected[0].boundingBox;
-    const tracked = (method === 'deep' ? neuralTracker : faceTracker).update({ x: b.originX, y: b.originY, w: b.width, h: b.height }, dt);
-    const motion = tracked.motion;
-    const box = clippedBox(tracked.box, $('video').videoWidth, $('video').videoHeight);
-    // Normal head movement changes the crop, but does not erase capture history.
-    previousBox = box;
-    context.strokeStyle = motion > 0.04 ? '#d6a585' : '#bca0dc'; context.lineWidth = 2;
-    context.strokeRect(box.x, box.y, box.w, box.h);
-    // Sample three fixed subregions within the detected face, avoiding eyes/mouth.
-    if (box.w < 1 || box.h < 1) { displayInvalid('Move your face into the frame'); return; }
-    sampleContext.clearRect(0, 0, 64, 64);
-    sampleContext.drawImage($('video'), box.x, box.y, box.w, box.h, 0, 0, 64, 64);
-    const skin = method === 'pos' ? skinSampler.sample($('video'), regions[0].patches, lastResult?.valid ? lastResult.bpm : null, now) : null;
-    const pixels = sampleContext.getImageData(0, 0, 64, 64).data;
-    const rgb = skin?.rgb || [0, 1, 2].map(k => { let sum = 0; for (let i = k; i < pixels.length; i += 4) sum += pixels[i]; return sum / (pixels.length / 4); });
-    const brightness = mean(rgb);
-    if (method === 'pos' && (brightness < 18 || brightness > 245 || box.w < 60 || !skin)) {
-      displayInvalid('Adjust distance / lighting');
-      $('guidance').textContent = 'Use even lighting and bring your face closer. Your previous session readings are retained.'; return;
-    }
-    lastFaceAt = now;
-    rgbRows.push({ t: now, v: [...rgb] }); while (rgbRows.length && now - rgbRows[0].t > 60000) rgbRows.shift();
-    const neuralBox = clippedBox({ x: box.x, y: box.y - box.h * 0.24, w: box.w, h: box.h * 1.2 }, $('video').videoWidth, $('video').videoHeight);
-    cropContext.clearRect(0, 0, 36, 36);
-    cropContext.drawImage($('video'), neuralBox.x, neuralBox.y, neuralBox.w, neuralBox.h, 0, 0, 36, 36);
-    $('face-roi').getContext('2d').drawImage(crop, 0, 0, 180, 180);
-    if ($('amplify').checked) {
-      const pixels = sampleContext.getImageData(0, 0, 64, 64);
-      const enhanced = amplifier.process(pixels, dt, Number($('gain').value));
-      const amplified = $('amplified-video');
-      amplified.width = 64; amplified.height = 64;
-      amplified.getContext('2d').putImageData(new ImageData(enhanced, 64, 64), 0, 0);
-    }
-    if (method === 'pos') append({ t: now, v: rgb });
-    else if (!deepBusy) {
-      const rgba = cropContext.getImageData(0, 0, 36, 36).data, pixels = new Float32Array(36 * 36 * 3);
-      for (let i = 0; i < 36 * 36; i++) for (let k = 0; k < 3; k++) pixels[i * 3 + k] = rgba[i * 4 + k] / 255;
-      const stamp = neuralClock.update(now);
-      lastDeepFrameAt = now;
-      deepBusy = true; deepWorker.postMessage({ type: 'frame', pixels, dt: stamp.dt, t: stamp.t, epoch: captureEpoch }, [pixels.buffer]);
-    }
-    const duration = rows.length ? (now - rows[0].t) / 1000 : 0;
-    $('capture-details').textContent = `${method === 'pos' ? 'POS' : 'FacePhys'} · ${frameTimes.length} FPS · ${duration.toFixed(1)} s of signal · ${rows.length} samples`;
-    researchPanels.progress({ pulseSeconds: rows.length > 1 ? (rows.at(-1).t - rows[0].t) / 1000 : 0, colorSeconds: rgbRows.length > 1 ? (rgbRows.at(-1).t - rgbRows[0].t) / 1000 : 0 });
-    const requiredWindow = method === 'deep' ? 450 : 150;
-    const ready = rows.length >= requiredWindow;
-    if (!ready) {
-      displayInvalid(`Collecting signal · ${Math.min(100, Math.floor(rows.length / requiredWindow * 100))}%`);
-      $('guidance').textContent = 'Stay still while the signal builds. A longer observation gives better frequency resolution.';
-    }
-    if (ready && !analysisBusy && !pendingAnalysis && now - lastAnalysisAt > 1000) {
-      lastAnalysisAt = now; analysisBusy = true; goodFrames++;
-      analysisWorker.postMessage({ method, rows, rgbRows, referenceBpm: lastResult?.valid ? lastResult.bpm : null, id: goodFrames });
-    }
-  } catch (error) { stop(); message('Capture error: ' + error.message, true); }
+    researchPanels.progress(data.capture);
+    if (!data.face) { displayInvalid(data.guidance || 'Face not detected'); $('guidance').textContent = data.guidance; return; }
+    const box = data.box; context.strokeStyle = '#bca0dc'; context.lineWidth = 2;
+    context.strokeRect(box.x / scale, box.y / scale, box.w / scale, box.h / scale);
+    if (data.sample) append(data.sample);
+    if (data.crop) paintPixels($('face-roi'), data.crop, 36);
+    if (data.amplified) paintPixels($('amplified-video'), data.amplified, 36);
+    if (data.visualization) updateInspector(data.visualization);
+    if (data.insights) researchPanels.update(data.insights);
+    if (Object.hasOwn(data, 'result')) applyResult(data.result);
+    $('latency').textContent = `${(data.latency || 0).toFixed(1)} ms`;
+    $('capture-details').textContent = `Python ${method === 'pos' ? 'POS' : 'FacePhys'} · ${frameTimes.length} FPS · ${data.capture.pulseSeconds.toFixed(1)} s · ${data.capture.samples} samples`;
+    const needed = method === 'deep' ? 450 : 150;
+    if (data.capture.samples < needed) displayInvalid(`Collecting signal · ${Math.floor(data.capture.samples / needed * 100)}%`);
+  } catch (error) {
+    if (token === runId) { stop(); message(error.message, true); }
+  } finally { if (token === runId) pythonBusy = false; }
 }
 
 function applyResult(result) {
@@ -389,7 +275,7 @@ $('export-benchmark').addEventListener('click', () => download('pulselens-benchm
 $('start').addEventListener('click', start); $('stop').addEventListener('click', () => stop());
 $('consent').addEventListener('change', () => { if (!$('consent').checked && (running || starting)) stop('Consent withdrawn. Camera and inference stopped.'); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && (running || starting)) stop('Session stopped because this tab became hidden.'); });
-window.addEventListener('pagehide', () => { stream?.getTracks().forEach(track => track.stop()); deepWorker?.terminate(); spectrumWorker?.terminate(); analysisWorker?.terminate(); });
+window.addEventListener('pagehide', () => { stream?.getTracks().forEach(track => track.stop()); endPythonSession(pythonSession); });
 window.addEventListener('resize', renderCharts);
 function updateInspector(output) {
   lastVisualization = output;
@@ -410,53 +296,31 @@ function renderInspector() {
 $('model-layer').addEventListener('change', renderInspector);
 $('gain').addEventListener('input', () => $('gain-value').textContent = $('gain').value + '×');
 $('amplify').addEventListener('change', () => {
-  amplifier.reset();
   if (!$('amplify').checked) {
     $('amplified-video').width = $('amplified-video').height = 128;
     clearPanel($('amplified-video'), 'Amplification off');
   }
 });
 
-let offlineRegistration = null;
-if ('serviceWorker' in navigator && window.isSecureContext) {
-  offlineRegistration = navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { type: 'module', updateViaCache: 'none' });
-  offlineRegistration.catch(() => { $('offline-status').textContent = 'Offline cache unavailable'; });
-}
-$('prepare-offline').addEventListener('click', async () => {
-  if (running || starting) return;
-  offlinePreparing = true;
-  const button = $('prepare-offline'); button.disabled = true;
-  try {
-    if (!offlineRegistration) throw new Error('Offline support needs HTTPS or localhost and Service Workers.');
-    await offlineRegistration; await navigator.serviceWorker.ready;
-    if (!navigator.serviceWorker.controller) throw new Error('Reload this page once to activate offline caching, then try again.');
-    button.textContent = 'Preparing…'; message('Caching the application, detector, model and runtime. No camera is opened.');
-    if (!detector) detector = await createDetector();
-    if (!landmarkDetector) landmarkDetector = await createLandmarker();
-    await checkNeuralRuntime(progress => message(progress));
-    const channel = new MessageChannel();
-    const saved = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Offline cache did not confirm readiness.')), 10000);
-      channel.port1.onmessage = ({ data }) => { clearTimeout(timeout); data.ready ? resolve(data) : reject(new Error(data.error || 'Offline assets incomplete.')); };
-    });
-    navigator.serviceWorker.controller.postMessage({ type: 'prepare' }, [channel.port2]);
-    await saved;
-    $('offline-status').textContent = '◈ Offline assets prepared';
-    message('Offline assets prepared in this browser. Test once with the network disconnected; browser storage can still be cleared.');
-  } catch (error) { message(error.message, true); }
-  finally { button.textContent = 'Prepare offline use'; button.disabled = false; offlinePreparing = false; }
-});
-$('check-system').addEventListener('click', async () => {
+// The Python server must remain running; unregister the old browser-model cache.
+if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(registrations => {
+  const scope = new URL('../', import.meta.url).href;
+  registrations.filter(registration => registration.scope === scope).forEach(registration => registration.unregister());
+}).catch(() => {});
+async function checkPython(button) {
   if (running || starting || offlinePreparing) return;
-  offlinePreparing = true; $('check-system').disabled = true; $('prepare-offline').disabled = true;
+  offlinePreparing = true; $('check-system').disabled = $('prepare-offline').disabled = true;
   try {
-    message('Checking the detector and real neural runtime without opening the camera…');
-    if (!detector) detector = await createDetector();
-    if (!landmarkDetector) landmarkDetector = await createLandmarker();
-    await checkNeuralRuntime(progress => message(progress));
-    message('System check passed: face detector, face landmarks, 480 FacePhys frames, feature projection, SQI and PSD all executed. No camera was opened.');
-  } catch (error) { message('System check failed: ' + error.message, true); }
-  finally { offlinePreparing = false; $('check-system').disabled = false; $('prepare-offline').disabled = false; }
-});
+    message('Python is checking both face trackers, 480 recurrent frames, projection, SQI and PSD. No camera is opened.');
+    const health = await requestJSON('/api/health');
+    if (health.backend !== 'python') throw new Error('Run python app.py to start the Python server.');
+    const result = await requestJSON('/api/check', { method: 'POST' });
+    if (!result.ok) throw new Error('Python model check did not pass.');
+    message(button === 'offline' ? 'Python models are cached locally. Keep this Python server running for offline use.' : 'Python system check passed: face trackers, 480 FacePhys frames, feature projection, SQI and PSD.');
+  } catch (error) { message(error.message, true); }
+  finally { offlinePreparing = false; $('check-system').disabled = $('prepare-offline').disabled = false; }
+}
+$('prepare-offline').addEventListener('click', () => checkPython('offline'));
+$('check-system').addEventListener('click', () => checkPython('check'));
 resetInspector(); resetResearchValues();
 updateView();

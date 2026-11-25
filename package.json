@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Browser-local webcam pulse estimation: POS baseline versus pretrained FacePhys SSM",
+  "description": "Python POS and FacePhys inference with a lavender browser interface",
   "scripts": {
-    "start": "node scripts/serve.mjs",
+    "start": "python3 app.py",
     "test": "node --test tests/*.test.mjs",
     "build": "node scripts/build.mjs",
     "models": "python3 scripts/download_models.py"

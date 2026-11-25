@@ -6,3 +6,7 @@ benchmark/output/
 models/*.tflite
 models/*.gz
 *.zip
+
+.venv/
+models/*.task
+models/*.part

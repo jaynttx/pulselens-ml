@@ -1,165 +1,124 @@
-# PulseLens · Contactless pulse research
+# PulseLens — Python ML project
 
-A fresh student-project implementation of webcam heart-rate estimation with a
-lavender, white, and cream frontend. Prepared for **jaynttx**.
+Contactless pulse research for **jaynttx**, with a lavender, white and cream
+website. Face tracking, POS, FFT analysis, pretrained FacePhys inference,
+breathing, pulse-rate variability, and temporal video amplification run in
+**Python**. HTML/CSS and small JavaScript modules handle the webcam and charts.
 
-## Run it
+## Run on your Mac
 
-Requirements: Node.js 20+ and a webcam. Python 3.9+ is optional for model caching
-and benchmark analysis. No npm packages need installing.
-
-```bash
-npm start
-```
-
-Open **http://localhost:4173** in Chrome or Edge. Check the local-processing
-consent box, select Classical POS or Deep learning, and start the camera.
-Face a light source, sit still, and allow 20–30 seconds. Stopping, changing tabs,
-revoking consent, or navigating away releases the camera.
-
-Before measuring, **Run system check** in Research insights checks the actual
-detector and neural runtime without opening a camera. It executes FacePhys,
-480 consecutive recurrent frames, feature projection, and SQI/PSD on the resulting
-450-sample window using artificial diagnostic input; these are never
-displayed as a person's pulse. If camera permission remains unanswered, the app
-times out with instructions instead of staying on Preparing.
-
-The first start needs internet access for MediaPipe. Deep mode also downloads
-FacePhys model assets and the LiteRT WASM runtime. To cache the weights first:
+Use Python 3.11–3.13. Stop the old `npm start` server with Ctrl+C first.
 
 ```bash
-npm run models
+cd "/Users/jayantkaushik/Documents/Codex/2026-11-24/new-chat/work/pulselens"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py
 ```
 
-For offline preparation, open the frontend online and click **Prepare offline
-use** in Research insights. It loads the detector, all five neural assets, and
-their runtime without opening the webcam. The service worker confirms cached
-assets before showing a prepared status. Reload once if prompted. Then test
-with the network disconnected. Browser storage eviction or cleared caches
-requires preparation again. Camera access requires localhost or HTTPS.
+Open **http://localhost:4173** in Chrome. Select a method, check consent, allow
+the webcam, and capture for 30–60 seconds. Keep the terminal running.
+If port 4173 is already occupied, use `python app.py --port 4174` and open
+http://localhost:4174 instead. Node.js is not required to run the website.
 
-If downloads fail, the app reports an error. It never substitutes fake BPM
-values or silently changes the selected method.
+The first start downloads the selected detector/model assets. To download all
+assets before opening the camera:
 
-## Features
+```bash
+python scripts/download_models.py
+```
 
-- Original responsive frontend with lavender, white, and cream styling.
-- MediaPipe face mesh, forehead/cheek skin masks and frequency-adaptive spatial weights for POS.
-- BlazeFace face boxes with scalar Kalman smoothing and 36 × 36 RGB input for pretrained neural inference.
-- Reference-style smoothed frame interval and virtual timestamps; normal motion does not reset neural state.
-- Smoothed face regions and a short face-loss grace period avoid resets from detector jitter.
-- Original overlapping POS implementation with timestamp-aware resampling.
-- Zero-phase Butterworth filtering precedes spectral/autocorrelation quality tests.
-- Browser-local pretrained FacePhys SSM inference in a dedicated worker.
-- Rolling pulse waveform, frequency spectrum, and accepted-reading trend.
-- Motion, lighting, periodicity, and signal-quality checks; unreliable values hidden.
-- Start/stop, consent withdrawal, cancellation, and camera lifecycle handling.
-- CSV export of session samples and accepted BPM estimates.
-- Paired benchmark lab with MAE, RMSE, bias, CSV export, and Python analysis.
-- Live face crop, layer-selectable learned feature maps, and projected hidden-state trajectories.
-- Separate learned SQI/PSD worker: raw 450-sample input, SQI > 0.38, actual timing correction.
-- Neural acceptance uses learned SQI; classical periodicity checks do not veto neural estimates.
-- Experimental breathing proxy after 30 seconds and pulse-rate variability (RMSSD/SDNN) after about 60 clean seconds.
-- Research panels use independent readiness checks, show captured-window progress, and preserve labelled results after stopping. A failed short BPM window does not suppress a valid breathing window.
-- Pixel-wise temporal colour/video amplification, toggle and 1–30× gain control.
-- Installable web manifest and explicit offline asset preparation; camera data is never cached.
-- Deterministic signal-processing tests and a GitHub Actions check workflow.
+**Run system check** executes both Python face trackers and 480 recurrent model
+frames, projection, SQI and PSD using artificial diagnostic input. It does not
+open the webcam or present diagnostic input as a human measurement.
 
-## What is ML here?
+If Python on macOS reports a certificate error, install the certificates using
+the `Install Certificates.command` supplied by your python.org installation;
+do not disable HTTPS verification. The model downloader uses certifi roots.
 
-Deep mode uses the **pretrained FacePhys state-space model**. Model weights and
-initial states are third-party assets, not trained by Jayant or this project.
-The neural worker implements its published/distributed tensor interface. The
-POS baseline is signal processing, not a trained ML estimator. Face detection
-uses a separate pretrained MediaPipe model.
+## What moved from JavaScript to Python?
 
-Our implementation includes the application, UI, POS/spectral routines, inference
-adapter, session handling, tests, evaluation workflow, and documentation. It is
-inspired by [xan-antx/pulseLens](https://github.com/xan-antx/pulseLens), rather than
-a fork or a claim of authorship over its model. The model revision is pinned to
-`e7bdd94cbe686611eb37f817bbdf48b8d770b057`. See THIRD_PARTY_NOTICES.md.
+| Python file | Responsibility |
+| --- | --- |
+| `app.py` | Application entry point |
+| `pulselens/web.py` | Local HTTP server, frame API, session lifecycle |
+| `pulselens/face_models.py` | CPU adapters for pretrained BlazeFace and 478-point face landmarks |
+| `pulselens/vision.py` | Face regions, forehead/cheek skin regions, adaptive pixel weights, amplification |
+| `pulselens/tracking.py` | Kalman smoothing and frame timing |
+| `pulselens/signals.py` | POS, resampling, detrending, Butterworth filtering, FFT and BPM quality checks |
+| `pulselens/facephys.py` | Python LiteRT tensor adapter, recurrent state, projection, SQI/PSD |
+| `pulselens/vitals.py` | Respiratory proxy and pulse-rate variability |
+| `pulselens/session.py` | Connects the processing stages and independent research windows |
+| `pulselens/assets.py` | Pinned pretrained model download |
+| `benchmark/analyze.py` | Paired-reference evaluation |
 
-This implements the same core research feature groups through a new codebase
-and frontend. Deep mode uses pretrained projection, SQI, and PSD assets;
-classical mode uses our analytical implementation. Experimental secondary
-vitals and temporal amplification are our own implementations. We do not claim
-identical numerical behavior, runtime performance, or clinical accuracy.
+Face models execute through Google LiteRT's Python CPU runtime. This avoids
+the native MediaPipe Metal graph that can abort on a headless Mac, while
+retaining MediaPipe's pretrained detector and landmark weights. The Python
+adapter implements model preprocessing, anchor decoding, NMS and rotated crops.
 
-## Verify and evaluate
+The old JavaScript processing workers were removed. `src/app.js` captures and
+sends lossless RGBA camera frames to the Python server and renders its results;
+it does not extract pulse, execute neural models, or calculate research vitals.
+The remaining JavaScript also draws charts and formats CSV/dashboard values.
+A web browser needs this small client-side camera/interface layer.
+
+## Research approach
+
+- Classical: MediaPipe face landmarks → skin-filtered forehead/cheek colour →
+  timestamp resampling → overlapping 1.6-second POS → detrending and filtering →
+  FFT peak and autocorrelation quality checks.
+- Neural: BlazeFace → Kalman-smoothed expanded 36×36 RGB crop → pretrained
+  FacePhys recurrent inference → 450 raw pulse samples → learned SQI/PSD, with
+  actual frame-time correction. Learned SQI above 0.38 gates neural readings.
+- Breathing uses a separate 30-second colour window. Pulse-rate variability
+  needs about 60 seconds and consistent beat intervals. Panels show progress;
+  stopping preserves previous results with clear historical labels.
+
+The same research methods and pretrained assets are retained. Rewriting an
+implementation does not guarantee identical numerical outputs or performance.
+
+## Privacy and deployment
+
+Run the server on this computer only; it binds to **127.0.0.1**. The browser sends
+raw frames solely to that local Python process. Frames and measurements stay
+in memory and are not logged or written to disk. Closing/stopping a session
+releases its tracker and buffers. Exporting CSV is an explicit user action.
+
+This differs from the earlier browser-only implementation: the Python server
+must remain running, including during offline use. Cached model weights avoid
+repeat downloads. Static-only hosting such as GitHub Pages cannot run this
+Python backend. Do not expose this development server over the internet.
+
+## Tests
+
+```bash
+python -m pip install -r requirements-test.txt
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+Optional frontend checks, if Node.js is installed:
 
 ```bash
 npm test
-python3 -m unittest discover -s tests -p 'test_*.py'
 npm run build
 ```
 
-Tests recover known synthetic pulse and respiratory frequencies, verify pulse
-variability and real pixel amplification, and check noise rejection, timing,
-CSV escaping, benchmark calculations, frontend DOM wiring, and service-worker
-cache behavior. Synthetic and mocked-DOM tests prove numerical/contracts
-behavior, **not human measurement accuracy or real-browser model execution**.
+Tests exercise known synthetic pulse/respiration frequencies, noise rejection,
+PRV, tensor/state contracts, frame decoding, Python session processing, and a
+real loopback HTTP API. Camera/vision/model doubles in unit tests are labelled
+as synthetic; they do not validate human accuracy. The actual pretrained
+runtime is checked separately by **Run system check** or
+`python scripts/check_models.py`, and by the pretrained-runtime CI job. Compare live readings
+with a simultaneous reference device before reporting accuracy.
 
-1. Run one method under good light, dim light, motion, and after exercise.
-2. Use a reference device simultaneously with each app observation. Record a
-   fresh reference when changing methods; do not reuse a stale watch reading.
-3. Add paired app/reference observations in Benchmark lab and export CSV.
-4. Analyze: `python3 benchmark/analyze.py pulselens-benchmark.csv`.
-5. Report trial counts and per-condition MAE/RMSE/bias. No human benchmark data
-   or claimed clinical accuracy is bundled.
+## Models and attribution
 
-## Build and publish
-
-`npm run build` writes the static app to `dist/`. Host that folder over HTTPS.
-No server-side biometric inference or database is required. The project lives in
-[jaynttx/pulselens-ml](https://github.com/jaynttx/pulselens-ml), a separate repository.
-
-## Same research approach, independently written application
-
-| Stage | Classical POS | Pretrained SSM |
-| --- | --- | --- |
-| Face tracking | MediaPipe face mesh | MediaPipe BlazeFace |
-| Input | Skin pixels from forehead and cheeks, adaptive spatial weights | Expanded 36 × 36 RGB face crop |
-| Pulse extraction | Overlapping 1.6-second POS projection | Recurrent FacePhys inference and carried hidden state |
-| Postprocessing | Detrending, Butterworth filter, FFT peak and autocorrelation | 450 raw pulse values through pretrained SQI and PSD |
-| Timing | Uniform timestamp-aware samples | Correct learned rate with actual frame interval |
-| Frontend | Waveform, spectrum, trend, export and research panels | Same UI plus projected feature/state views |
-
-The application modules are written here. Pretrained weights and tensor layouts
-remain external model interfaces and have their own attribution. A rewritten
-implementation can share a research method without reproducing identical output.
-The respiratory proxy and PRV panels are experimental extensions.
-
-## Project layout
-
-| Path | Purpose |
-| --- | --- |
-| `index.html`, `src/style.css` | Frontend |
-| `src/app.js` | Camera, face sampling, sessions, benchmark UI |
-| `src/signal.js` | POS, uniform resampling, detrending, spectra, metrics |
-| `src/analysis.worker.js` | Background signal analysis |
-| `src/deep.worker.js` | Pretrained FacePhys inference and projection |
-| `src/spectrum.worker.js`, `src/model-runtime.js` | Independent learned SQI/PSD and shared classic-worker loader |
-| `src/skin.js` | Face-mesh regions, skin filtering and adaptive spatial weighting |
-| `src/vitals.js` | Experimental respiration and pulse variability |
-| `src/visuals.js`, `src/insights.css` | Model inspection and temporal amplification |
-| `sw.js`, `manifest.webmanifest` | Offline asset cache and install metadata |
-| `scripts/download_models.py` | Optional pinned asset download |
-| `benchmark/analyze.py` | Paired evaluation |
-| `docs/PROJECT_GUIDE.md` | Explanation, study design, viva preparation |
-
-## Limits and privacy
-
-Research only; not a medical device. Motion, lighting, camera frame timing,
-skin appearance, and training-domain differences can cause wrong estimates.
-Quality is a periodicity heuristic plus learned SQI in Deep mode, not calibrated
-medical confidence. The HRV-labelled panel explicitly reports exploratory
-**pulse-rate variability**, which is not interchangeable with ECG-derived
-HRV. The breathing proxy can confuse periodic movement/lighting with
-respiration. No oxygen saturation, diagnoses, or stress claims are made.
-Webcam frames, pulse samples, and inferred BPM remain in local tab memory.
-Only explicit CSV downloads persist measurements. Service-worker caching stores
-application/model assets, never measurements or frames. External CDN requests
-load model/runtime assets and fonts; no analytics or physiological uploads exist.
-
-Fresh application code is MIT licensed. FacePhys remains subject to its own
-MIT License with Privacy Protection Addendum, reproduced in the notices.
+FacePhys weights/initial states are third-party pretrained assets, not trained
+by this project. PulseLens by [xan-antx](https://github.com/xan-antx/pulseLens)
+inspired the method comparison. Assets are pinned to revision
+`e7bdd94cbe686611eb37f817bbdf48b8d770b057`.
+See `THIRD_PARTY_NOTICES.md` for the model's MIT licence with Privacy Protection
+Addendum. The new application code is MIT licensed. This is a student research
+prototype, not a medical device or a basis for diagnoses.

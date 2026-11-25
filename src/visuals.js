@@ -32,22 +32,3 @@ export function trajectory(canvas, points) {
     ctx.strokeStyle = `rgba(128,86,172,${0.1 + i / points.length * 0.9})`; ctx.lineWidth = 2; ctx.stroke();
   }
 }
-
-// True pixel-wise temporal amplification, not a decorative BPM animation.
-export class TemporalAmplifier {
-  constructor() { this.reset(); }
-  reset() { this.fast = null; this.slow = null; }
-  process(pixels, dt, gain) {
-    const data = pixels.data;
-    if (!this.fast) { this.fast = Float32Array.from(data); this.slow = Float32Array.from(data); }
-    const a = 1 - Math.exp(-2 * Math.PI * 3.33 * Math.min(dt, 0.1));
-    const b = 1 - Math.exp(-2 * Math.PI * 0.67 * Math.min(dt, 0.1));
-    const output = new Uint8ClampedArray(data.length);
-    for (let i = 0; i < data.length; i++) {
-      if (i % 4 === 3) { output[i] = 255; continue; }
-      this.fast[i] += a * (data[i] - this.fast[i]); this.slow[i] += b * (data[i] - this.slow[i]);
-      output[i] = data[i] + gain * (this.fast[i] - this.slow[i]);
-    }
-    return output;
-  }
-}
